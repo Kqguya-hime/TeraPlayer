@@ -297,8 +297,27 @@ struct ContentView: View {
                 }
                 .pickerStyle(.segmented)
 
+                HStack(spacing: 10) {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundStyle(.secondary)
+
+                    TextField(searchPlaceholder, text: $searchText)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+
+                    if !searchText.isEmpty {
+                        Button {
+                            searchText = ""
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+
                 if libraryBrowseMode == "アーティスト" {
-                    ForEach(artistNames, id: \.self) { artist in
+                    ForEach(filteredArtistNames, id: \.self) { artist in
                         Button {
                             selectedArtist = artist
                             selectedAlbum = nil
@@ -309,7 +328,7 @@ struct ContentView: View {
                         }
                     }
                 } else if libraryBrowseMode == "アルバム" {
-                    ForEach(albumNames, id: \.self) { album in
+                    ForEach(filteredAlbumNames, id: \.self) { album in
                         Button {
                             selectedAlbum = album
                             selectedArtist = nil
@@ -346,16 +365,16 @@ struct ContentView: View {
                         }
                     }
 
-                    Picker("検索対象", selection: $searchField) {
-                        ForEach(MusicSearchField.allCases) { field in
-                            Text(field.rawValue).tag(field)
+                    Menu {
+                        Picker("検索対象", selection: $searchField) {
+                            ForEach(MusicSearchField.allCases) { field in
+                                Text(field.rawValue).tag(field)
+                            }
                         }
+                    } label: {
+                        Label("検索対象", systemImage: "slider.horizontal.3")
                     }
-                    .pickerStyle(.segmented)
-
-                    TextField("曲を検索", text: $searchText)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
+                    .menuStyle(.borderlessButton)
 
                     if isLoading {
                         ProgressView("読み込み中...")
@@ -553,6 +572,35 @@ struct ContentView: View {
                 }
             }
             .navigationTitle("管理")
+        }
+    }
+
+    // MARK: - 検索
+
+    private var searchPlaceholder: String {
+        switch libraryBrowseMode {
+        case "アーティスト":
+            return "アーティストを検索"
+        case "アルバム":
+            return "アルバムを検索"
+        default:
+            return "曲を検索"
+        }
+    }
+
+    private var filteredArtistNames: [String] {
+        let keyword = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !keyword.isEmpty else { return artistNames }
+        return artistNames.filter {
+            $0.localizedCaseInsensitiveContains(keyword)
+        }
+    }
+
+    private var filteredAlbumNames: [String] {
+        let keyword = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !keyword.isEmpty else { return albumNames }
+        return albumNames.filter {
+            $0.localizedCaseInsensitiveContains(keyword)
         }
     }
 
