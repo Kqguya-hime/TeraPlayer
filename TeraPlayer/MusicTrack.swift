@@ -35,6 +35,8 @@ final class MusicTrack {
     var lastPlayed: Date?
     var playCount: Int
     var isFavorite: Bool
+    // 未再生シャッフルの現在サイクルで再生済みか（nil は未再生として扱う）
+    var hasBeenPlayedInUnplayedShuffle: Bool? = nil
     
     //更新日時と署名
     var cloudModified: String?
