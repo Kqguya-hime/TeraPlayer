@@ -160,9 +160,10 @@ struct ContentView: View {
     @State private var isScanningLibrary = false
     @State private var libraryScanStatus = ""
     
-    // 現在開いているフォルダのファイル
+    // 現在表示しているファイル
     @State private var files: [OpenListFile] = []
     @State private var currentPath = "/terabox"
+    @State private var isOfflineMode = false
 
     // ライブラリ検索
     @State private var searchField: MusicSearchField = .title
@@ -443,7 +444,7 @@ struct ContentView: View {
                             await goToParentFolder()
                         }
                     }
-                    .disabled(currentPath == "/terabox")
+                    .disabled(isOfflineMode || currentPath == "/terabox")
                 }
 
                 ToolbarItemGroup(placement: .topBarTrailing) {
@@ -508,6 +509,7 @@ struct ContentView: View {
                     print("Wi-Fi接続を検知：自動同期を開始")
 
                     Task {
+                        await loadFiles()
                         await scanLibrary()
                     }
                 }
@@ -536,6 +538,7 @@ struct ContentView: View {
                     print("アプリ復帰：Wi-Fi接続中のため自動同期")
 
                     Task {
+                        await loadFiles()
                         await scanLibrary()
                     }
                 }
@@ -889,6 +892,10 @@ struct ContentView: View {
 
                     try syncContext.save()
 
+                    if isOfflineMode {
+                        files = makeOfflineFiles()
+                    }
+
                     print("保存完了: \(track.title)")
 
                 } else {
@@ -1121,9 +1128,40 @@ struct ContentView: View {
     // MARK: - 基本処理
 
     private var folderName: String {
-        currentPath == "/terabox"
-        ? "TeraBox"
-        : currentPath.components(separatedBy: "/").last ?? "TeraBox"
+        if isOfflineMode {
+            return "オフライン保存"
+        }
+
+        return currentPath == "/terabox"
+            ? "TeraBox"
+            : currentPath.components(separatedBy: "/").last ?? "TeraBox"
+    }
+
+    // 端末に実際に保存されている曲だけをオフライン一覧にする
+    private func makeOfflineFiles() -> [OpenListFile] {
+        let store = OfflineMusicStore()
+
+        return musicTracks
+            .filter { track in
+                track.path.hasPrefix("/terabox/")
+                    && track.isDownloaded
+                    && track.localFileName != nil
+                    && (try? store.fileExists(track.localFileName!)) == true
+            }
+            .map { track in
+                OpenListFile(
+                    name: track.fileName,
+                    size: track.fileSize,
+                    is_dir: false,
+                    modified: track.cloudModified,
+                    created: nil,
+                    sign: track.cloudSign,
+                    path: track.path
+                )
+            }
+            .sorted {
+                $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+            }
     }
 
     // 音楽ファイルか判定
@@ -1135,7 +1173,7 @@ struct ContentView: View {
 
     // ファイルのフルパスを作成
     private func makePath(for file: OpenListFile) -> String {
-        "\(currentPath)/\(file.name)"
+        file.path ?? "\(currentPath)/\(file.name)"
     }
 
     // MARK: - バックグラウンド再生
@@ -1257,8 +1295,17 @@ struct ContentView: View {
         do {
             files = try await service.getFiles(path: currentPath)
 
+            if isOfflineMode {
+                libraryScanStatus = "オンラインライブラリに再接続しました"
+            }
+
+            isOfflineMode = false
+
         } catch {
-            errorMessage = error.localizedDescription
+            isOfflineMode = true
+            files = makeOfflineFiles()
+            libraryScanStatus = "オフラインモード：保存済み \(files.count) 曲"
+            errorMessage = ""
         }
     }
 
@@ -1278,7 +1325,8 @@ struct ContentView: View {
     // 1つ上のフォルダへ移動
     private func goToParentFolder() async {
 
-        guard currentPath != "/terabox" else {
+        guard !isOfflineMode,
+              currentPath != "/terabox" else {
             return
         }
 
@@ -1503,12 +1551,21 @@ struct ContentView: View {
 
                     try? modelContext.save()
 
+                    guard !isOfflineMode else {
+                        throw CocoaError(.fileNoSuchFile)
+                    }
+
                     musicURL = try await service.getMusicURL(
                         path: item.path
                     )
                 }
 
             } else {
+
+                // オフライン時はクラウドへのアクセスを試みない
+                guard !isOfflineMode else {
+                    throw CocoaError(.fileNoSuchFile)
+                }
 
                 // 未ダウンロードならクラウドから再生
                 print("クラウド再生: \(item.file.name)")
