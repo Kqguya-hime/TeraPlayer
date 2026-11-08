@@ -238,6 +238,7 @@ struct ContentView: View {
     @State private var isPlaylistEditorPresented = false
     @State private var editingPlaylistID: String? = nil
     @State private var playlistNameDraft = ""
+    @State private var pendingPlaylistTrackPaths: [String]? = nil
     @State private var isPlaylistTrackPickerPresented = false
     @State private var addingTracksToPlaylistID: String? = nil
     @State private var selectedTrackPathsToAdd: [String] = []
@@ -666,6 +667,7 @@ struct ContentView: View {
                     Button {
                         editingPlaylistID = nil
                         playlistNameDraft = ""
+                        pendingPlaylistTrackPaths = nil
                         isPlaylistEditorPresented = true
                     } label: {
                         Label("新規プレイリストを作成", systemImage: "plus")
@@ -701,6 +703,7 @@ struct ContentView: View {
                             Button {
                                 editingPlaylistID = playlist.id
                                 playlistNameDraft = playlist.name
+                                pendingPlaylistTrackPaths = nil
                                 isPlaylistEditorPresented = true
                             } label: {
                                 Label("名前変更", systemImage: "pencil")
@@ -711,9 +714,20 @@ struct ContentView: View {
                 }
 
                 Section("パーソナライズ") {
-                    Text("再生統計をもとにした自動プレイリストは、次の段階で追加します。")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
+                    NavigationLink {
+                        personalizedPlaylistDetailScreen
+                    } label: {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("よく聴く曲")
+                                .foregroundStyle(.primary)
+                            Text("再生回数・完了数・総再生時間の順で最大30曲")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Text("\(personalizedTrackStatistics.count)曲")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
                 }
             }
             .navigationTitle("プレイリスト")
@@ -737,6 +751,7 @@ struct ContentView: View {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("キャンセル") {
                         isPlaylistEditorPresented = false
+                        pendingPlaylistTrackPaths = nil
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
@@ -759,7 +774,12 @@ struct ContentView: View {
             playlist.name = name
             playlist.updatedAt = Date()
         } else {
-            modelContext.insert(MusicPlaylist(name: name))
+            modelContext.insert(
+                MusicPlaylist(
+                    name: name,
+                    trackPaths: pendingPlaylistTrackPaths ?? []
+                )
+            )
         }
 
         do {
@@ -767,9 +787,67 @@ struct ContentView: View {
             isPlaylistEditorPresented = false
             editingPlaylistID = nil
             playlistNameDraft = ""
+            pendingPlaylistTrackPaths = nil
         } catch {
             errorMessage = "プレイリストを保存できませんでした: \(error.localizedDescription)"
         }
+    }
+
+    private var personalizedPlaylistDetailScreen: some View {
+        List {
+            Section {
+                Button {
+                    editingPlaylistID = nil
+                    playlistNameDraft = "よく聴く曲"
+                    pendingPlaylistTrackPaths = personalizedTrackStatistics.map(\\.path)
+                    isPlaylistEditorPresented = true
+                } label: {
+                    Label("自作プレイリストにコピー", systemImage: "doc.on.doc")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(personalizedTrackStatistics.isEmpty)
+
+                Text("全期間の再生履歴をもとに自動更新されます。コピーすると、その時点の曲構成で固定されます。")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("ランキング（最大30曲）") {
+                if personalizedTrackStatistics.isEmpty {
+                    Text("再生履歴がありません")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(Array(personalizedTrackStatistics.enumerated()), id: \\.element.path) { index, item in
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack {
+                                Text("\\(index + 1). \\(item.title)")
+                                    .lineLimit(1)
+                                Spacer()
+                                Text("\\(item.playCount)回")
+                                    .monospacedDigit()
+                            }
+
+                            if let artist = item.artist, !artist.isEmpty {
+                                Text(artist)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+
+                            HStack(spacing: 14) {
+                                Label("完了 \\(item.completionCount)回", systemImage: "checkmark.circle")
+                                Label(formattedListeningTime(item.listenedSeconds), systemImage: "clock")
+                            }
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        }
+                        .padding(.vertical, 3)
+                    }
+                }
+            }
+        }
+        .navigationTitle("よく聴く曲")
+        .navigationBarTitleDisplayMode(.inline)
     }
 
     private func playlistDetailScreen(_ playlist: MusicPlaylist) -> some View {
@@ -1526,6 +1604,44 @@ struct ContentView: View {
             return $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
         }
         .prefix(10)
+        .map { $0 }
+    }
+
+    // 全期間の再生統計から「よく聴く曲」上位30曲を作成する
+    private var personalizedTrackStatistics: [TrackStatistic] {
+        let tracksByPath = Dictionary(
+            musicTracks.map { ($0.path, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        let grouped = Dictionary(grouping: playbackHistories, by: \\.trackPath)
+
+        return grouped.compactMap { path, histories in
+            guard let track = tracksByPath[path], !histories.isEmpty else {
+                return nil
+            }
+
+            return TrackStatistic(
+                path: path,
+                title: track.title,
+                artist: track.artist,
+                playCount: histories.count,
+                listenedSeconds: histories.reduce(0) { $0 + $1.listenedSeconds },
+                completionCount: histories.filter(\\.completed).count
+            )
+        }
+        .sorted {
+            if $0.playCount != $1.playCount {
+                return $0.playCount > $1.playCount
+            }
+            if $0.completionCount != $1.completionCount {
+                return $0.completionCount > $1.completionCount
+            }
+            if $0.listenedSeconds != $1.listenedSeconds {
+                return $0.listenedSeconds > $1.listenedSeconds
+            }
+            return $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
+        }
+        .prefix(30)
         .map { $0 }
     }
 
