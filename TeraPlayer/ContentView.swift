@@ -322,7 +322,7 @@ struct ContentView: View {
     // 自動選曲する曲数
     private let shuffleQueueCount = 10
 
-    private enum ShuffleMode {
+    private enum ShuffleMode: Equatable {
         case off
         case normal
         case unplayed
@@ -2897,7 +2897,7 @@ struct ContentView: View {
 
         // 現在の自動選曲数
         let automaticCount = queue.filter {
-            $0.source == .automatic
+            $0.source == .shuffle
         }.count
 
         // 10曲に足りない分だけ補充
@@ -2997,7 +2997,7 @@ struct ContentView: View {
         do {
             try modelContext.save()
         } catch {
-            print("未再生フラグの初期化に失敗: \\(error.localizedDescription)")
+            print("未再生フラグの初期化に失敗: \(error.localizedDescription)")
         }
     }
 
@@ -3199,7 +3199,7 @@ struct ContentView: View {
         do {
             try modelContext.save()
         } catch {
-            print("未再生フラグの保存に失敗: \\(error.localizedDescription)")
+            print("未再生フラグの保存に失敗: \(error.localizedDescription)")
         }
     }
 
@@ -3364,7 +3364,7 @@ struct ContentView: View {
             return
         }
 
-        // 通常シャッフルのみ、従来どおり次の曲の再生開始後に補充
+        // 有効なシャッフル方式に応じて、次の曲の再生開始後に補充
         if activeRefillCondition == nil && queue.isEmpty && !isPlaylistPlayback {
             fillActiveShuffleQueue()
         }
