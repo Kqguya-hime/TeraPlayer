@@ -278,6 +278,11 @@ struct ContentView: View {
     @State private var errorMessage = ""
     @State private var isLoading = false
 
+    // OpenList APIトークン（入力値はKeychainへ保存）
+    @State private var openListTokenDraft = ""
+    @State private var isOpenListTokenConfigured = false
+    @State private var openListTokenStatus = ""
+
     // プレイヤー
     @State private var player = AVPlayer()
     @State private var isPlaying = false
@@ -1404,6 +1409,33 @@ struct ContentView: View {
     private var managementScreen: some View {
         NavigationStack {
             List {
+                Section("OpenList接続") {
+                    LabeledContent(
+                        "APIトークン",
+                        value: isOpenListTokenConfigured ? "登録済み" : "未登録"
+                    )
+
+                    SecureField("新しいAPIトークンを入力", text: $openListTokenDraft)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+
+                    Button("トークンを保存") {
+                        saveOpenListToken()
+                    }
+                    .disabled(openListTokenDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                    Button("保存済みトークンを削除", role: .destructive) {
+                        deleteOpenListToken()
+                    }
+                    .disabled(!isOpenListTokenConfigured)
+
+                    if !openListTokenStatus.isEmpty {
+                        Text(openListTokenStatus)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
                 Section("再生統計") {
                     NavigationLink {
                         statisticsScreen
@@ -1486,6 +1518,46 @@ struct ContentView: View {
                 }
             }
             .navigationTitle("管理")
+            .onAppear {
+                loadOpenListTokenStatus()
+            }
+        }
+    }
+
+    private func loadOpenListTokenStatus() {
+        do {
+            isOpenListTokenConfigured = try OpenListTokenStore.load()?.isEmpty == false
+            openListTokenStatus = isOpenListTokenConfigured
+                ? "トークンはこの端末のKeychainに保存されています。"
+                : "トークンを登録してください。"
+        } catch {
+            isOpenListTokenConfigured = false
+            openListTokenStatus = "Keychainを読み取れませんでした: \\(error.localizedDescription)"
+        }
+    }
+
+    private func saveOpenListToken() {
+        let token = openListTokenDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !token.isEmpty else { return }
+
+        do {
+            try OpenListTokenStore.save(token)
+            openListTokenDraft = ""
+            isOpenListTokenConfigured = true
+            openListTokenStatus = "トークンを端末内のKeychainに保存しました。"
+        } catch {
+            openListTokenStatus = "トークンを保存できませんでした: \\(error.localizedDescription)"
+        }
+    }
+
+    private func deleteOpenListToken() {
+        do {
+            try OpenListTokenStore.delete()
+            openListTokenDraft = ""
+            isOpenListTokenConfigured = false
+            openListTokenStatus = "保存済みトークンを削除しました。"
+        } catch {
+            openListTokenStatus = "トークンを削除できませんでした: \\(error.localizedDescription)"
         }
     }
 
