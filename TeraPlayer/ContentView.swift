@@ -2081,9 +2081,9 @@ struct ContentView: View {
 
                 Spacer()
 
-                // 再生キューを開く
+                // 再生画面では楽曲画面へ戻り、それ以外では再生画面を開く
                 Button {
-                    selectedTab = 1
+                    selectedTab = selectedTab == 1 ? 0 : 1
                 } label: {
                     Image(systemName: "list.bullet")
                         .foregroundStyle(.primary)
