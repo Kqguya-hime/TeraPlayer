@@ -902,7 +902,7 @@ struct ContentView: View {
             return
         }
 
-        let existingPaths = Set(queue.map(\\.path))
+        let existingPaths = Set(queue.map(\.path))
         var candidatePaths = playlist.trackPaths.filter { path in
             path != currentTrack?.path
         }
@@ -3099,7 +3099,7 @@ struct ContentView: View {
         }
 
         // 通常シャッフルのみ、従来どおり次の曲の再生開始後に補充
-        if activeRefillCondition == nil && isShuffle && queue.isEmpty {
+        if activeRefillCondition == nil && isShuffle && queue.isEmpty && !isPlaylistPlayback {
             fillShuffleQueue()
         }
     }
