@@ -539,6 +539,115 @@ struct ContentView: View {
     private var playbackScreen: some View {
         NavigationStack {
             List {
+                Section("現在再生中") {
+                    if let track = currentTrack {
+                        let metadata = musicTracks.first {
+                            $0.path == track.path
+                        }
+
+                        VStack(spacing: 18) {
+                            Image(systemName: "music.note")
+                                .font(.system(size: 54))
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 170)
+                                .background(.quaternary)
+                                .clipShape(RoundedRectangle(cornerRadius: 16))
+
+                            VStack(spacing: 6) {
+                                Text(metadata?.title ?? (track.file.name as NSString).deletingPathExtension)
+                                    .font(.title3.weight(.semibold))
+                                    .multilineTextAlignment(.center)
+                                    .lineLimit(2)
+
+                                Text(metadata?.artist ?? "アーティスト情報なし")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+
+                                Text(metadata?.album ?? "アルバム情報なし")
+                                    .font(.caption)
+                                    .foregroundStyle(.tertiary)
+                            }
+                            .frame(maxWidth: .infinity)
+
+                            HStack(spacing: 34) {
+                                Button {
+                                    playPrevious()
+                                } label: {
+                                    Image(systemName: "backward.end.fill")
+                                        .font(.title2)
+                                }
+                                .disabled(playHistory.isEmpty)
+                                .accessibilityLabel("前の曲")
+
+                                Button {
+                                    togglePlayback()
+                                } label: {
+                                    Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+                                        .font(.system(size: 30))
+                                        .frame(width: 64, height: 64)
+                                        .background(.blue)
+                                        .foregroundStyle(.white)
+                                        .clipShape(Circle())
+                                }
+                                .disabled(player.currentItem == nil)
+                                .accessibilityLabel(isPlaying ? "一時停止" : "再生")
+
+                                Button {
+                                    Task {
+                                        await playNext()
+                                    }
+                                } label: {
+                                    Image(systemName: "forward.end.fill")
+                                        .font(.title2)
+                                }
+                                .disabled(queue.isEmpty && !isShuffle && activeRefillCondition == nil)
+                                .accessibilityLabel("次の曲")
+                            }
+                            .buttonStyle(.plain)
+                            .frame(maxWidth: .infinity)
+
+                            HStack {
+                                Button {
+                                    toggleShuffle()
+                                } label: {
+                                    Label("シャッフル", systemImage: "shuffle")
+                                        .foregroundStyle(isShuffle ? .blue : .secondary)
+                                }
+
+                                Spacer()
+
+                                Button {
+                                    switch repeatMode {
+                                    case .off:
+                                        repeatMode = .all
+                                    case .all:
+                                        repeatMode = .one
+                                    case .one:
+                                        repeatMode = .off
+                                    }
+                                } label: {
+                                    Label(
+                                        repeatMode == .one ? "1曲リピート" : "リピート",
+                                        systemImage: repeatIcon
+                                    )
+                                    .foregroundStyle(repeatMode == .off ? .secondary : .blue)
+                                }
+                            }
+                            .font(.caption)
+                            .buttonStyle(.plain)
+                        }
+                        .padding(.vertical, 10)
+                    } else {
+                        ContentUnavailableView(
+                            "再生していません",
+                            systemImage: "music.note",
+                            description: Text("楽曲画面から曲を選択してください")
+                        )
+                        .frame(maxWidth: .infinity)
+                    }
+                }
+
                 Section("再生キュー（\(queue.count)曲）") {
                     if queue.isEmpty {
                         Text("キューは空です")
@@ -567,24 +676,6 @@ struct ContentView: View {
                     }
                     .onMove(perform: moveQueueItems)
                     .onDelete(perform: deleteQueueItems)
-                }
-
-                Section("現在再生中") {
-                    if let track = currentTrack {
-                        HStack {
-                            Image(systemName: "speaker.wave.2.fill")
-                                .foregroundStyle(.blue)
-                            VStack(alignment: .leading) {
-                                Text(track.file.name).lineLimit(1)
-                                Text(isPlaying ? "再生中" : "停止中")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                    } else {
-                        Text("再生していません")
-                            .foregroundStyle(.secondary)
-                    }
                 }
             }
             .navigationTitle("再生")
