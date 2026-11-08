@@ -2007,8 +2007,8 @@ struct ContentView: View {
             return
         }
 
-        // 最後の曲が再生開始したら10曲追加
-        if isShuffle && queue.isEmpty {
+        // 通常シャッフルのみ、従来どおり次の曲の再生開始後に補充
+        if activeRefillCondition == nil && isShuffle && queue.isEmpty {
             fillShuffleQueue()
         }
     }
