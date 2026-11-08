@@ -20,7 +20,7 @@ struct TeraPlayerApp: App {
         WindowGroup {
             ContentView()
         }
-        .modelContainer(for: [MusicTrack.self, PlaybackHistory.self])
+        .modelContainer(for: [MusicTrack.self, PlaybackHistory.self, MusicPlaylist.self])
     }
 }
 
