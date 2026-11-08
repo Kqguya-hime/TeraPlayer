@@ -232,7 +232,11 @@ struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Query private var musicTracks: [MusicTrack]
     @Query private var playbackHistories: [PlaybackHistory]
+    @Query private var playlists: [MusicPlaylist]
     @State private var statisticsPeriod: StatisticsPeriod = .all
+    @State private var isPlaylistEditorPresented = false
+    @State private var editingPlaylistID: String? = nil
+    @State private var playlistNameDraft = ""
 
     // ライブラリスキャンの状態
     @State private var isScanningLibrary = false
@@ -321,6 +325,9 @@ struct ContentView: View {
 
             managementScreen
                 .tag(2)
+
+            playlistScreen
+                .tag(3)
         }
         .tabViewStyle(.automatic)
         .toolbar(.hidden, for: .tabBar)
@@ -329,6 +336,7 @@ struct ContentView: View {
                 Text("楽曲").tag(0)
                 Text("再生").tag(1)
                 Text("管理").tag(2)
+                Text("プレイリスト").tag(3)
             }
             .pickerStyle(.segmented)
             .padding(.horizontal)
@@ -639,6 +647,150 @@ struct ContentView: View {
             }
         }
         .presentationDetents([.medium, .large])
+    }
+
+    // MARK: - プレイリスト画面
+
+    private var playlistScreen: some View {
+        NavigationStack {
+            List {
+                Section("自作プレイリスト") {
+                    if playlists.isEmpty {
+                        Text("プレイリストはまだありません")
+                            .foregroundStyle(.secondary)
+                    }
+
+                    ForEach(playlists.sorted { $0.createdAt < $1.createdAt }) { playlist in
+                        NavigationLink {
+                            playlistDetailScreen(playlist)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(playlist.name)
+                                    .foregroundStyle(.primary)
+                                Text("\(playlist.trackPaths.count)曲")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .swipeActions(edge: .trailing) {
+                            Button(role: .destructive) {
+                                modelContext.delete(playlist)
+                                try? modelContext.save()
+                            } label: {
+                                Label("削除", systemImage: "trash")
+                            }
+
+                            Button {
+                                editingPlaylistID = playlist.id
+                                playlistNameDraft = playlist.name
+                                isPlaylistEditorPresented = true
+                            } label: {
+                                Label("名前変更", systemImage: "pencil")
+                            }
+                            .tint(.blue)
+                        }
+                    }
+                }
+
+                Section("パーソナライズ") {
+                    Text("再生統計をもとにした自動プレイリストは、次の段階で追加します。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle("プレイリスト")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        editingPlaylistID = nil
+                        playlistNameDraft = ""
+                        isPlaylistEditorPresented = true
+                    } label: {
+                        Image(systemName: "plus")
+                    }
+                    .accessibilityLabel("プレイリストを作成")
+                }
+            }
+        }
+        .sheet(isPresented: $isPlaylistEditorPresented) {
+            playlistEditorSheet
+        }
+    }
+
+    private var playlistEditorSheet: some View {
+        NavigationStack {
+            Form {
+                Section("プレイリスト名") {
+                    TextField("名前を入力", text: $playlistNameDraft)
+                        .textInputAutocapitalization(.words)
+                }
+            }
+            .navigationTitle(editingPlaylistID == nil ? "新規プレイリスト" : "名前を変更")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("キャンセル") {
+                        isPlaylistEditorPresented = false
+                    }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("保存") {
+                        savePlaylistName()
+                    }
+                    .disabled(playlistNameDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+        }
+        .presentationDetents([.medium])
+    }
+
+    private func savePlaylistName() {
+        let name = playlistNameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return }
+
+        if let editingPlaylistID,
+           let playlist = playlists.first(where: { $0.id == editingPlaylistID }) {
+            playlist.name = name
+            playlist.updatedAt = Date()
+        } else {
+            modelContext.insert(MusicPlaylist(name: name))
+        }
+
+        do {
+            try modelContext.save()
+            isPlaylistEditorPresented = false
+            editingPlaylistID = nil
+            playlistNameDraft = ""
+        } catch {
+            errorMessage = "プレイリストを保存できませんでした: \\(error.localizedDescription)"
+        }
+    }
+
+    private func playlistDetailScreen(_ playlist: MusicPlaylist) -> some View {
+        List {
+            Section("曲一覧（\\(playlist.trackPaths.count)曲）") {
+                if playlist.trackPaths.isEmpty {
+                    Text("曲が登録されていません")
+                        .foregroundStyle(.secondary)
+                }
+
+                ForEach(playlist.trackPaths.indices, id: \\.self) { index in
+                    let path = playlist.trackPaths[index]
+                    if let track = musicTracks.first(where: { $0.path == path }) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(track.title)
+                            if let artist = track.artist, !artist.isEmpty {
+                                Text(artist)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .navigationTitle(playlist.name)
+        .navigationBarTitleDisplayMode(.inline)
     }
 
     private var playbackScreen: some View {
@@ -1418,6 +1570,12 @@ struct ContentView: View {
                     for history in histories {
                         syncContext.delete(history)
                     }
+                }
+
+                // 削除された曲をすべての自作プレイリストから除外
+                for playlist in playlists where playlist.trackPaths.contains(deletedPath) {
+                    playlist.trackPaths.removeAll { $0 == deletedPath }
+                    playlist.updatedAt = Date()
                 }
 
                 // 削除対象が現在の再生セッションなら、以後の記録を停止
