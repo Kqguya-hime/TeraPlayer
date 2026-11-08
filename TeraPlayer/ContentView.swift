@@ -124,6 +124,15 @@ enum RepeatMode {
     case one
 }
 
+// 検索対象
+private enum MusicSearchField: String, CaseIterable, Identifiable {
+    case title = "曲名"
+    case artist = "アーティスト"
+    case album = "アルバム"
+
+    var id: String { rawValue }
+}
+
 // キュー内の曲が手動追加か自動選曲かを区別する
 enum QueueSource: Equatable {
     case manual
@@ -145,6 +154,7 @@ struct ContentView: View {
     
     @Environment(\.modelContext) private var modelContext
     @Environment(\.scenePhase) private var scenePhase
+    @Query private var musicTracks: [MusicTrack]
 
     // ライブラリスキャンの状態
     @State private var isScanningLibrary = false
@@ -153,6 +163,10 @@ struct ContentView: View {
     // 現在開いているフォルダのファイル
     @State private var files: [OpenListFile] = []
     @State private var currentPath = "/terabox"
+
+    // ライブラリ検索
+    @State private var searchField: MusicSearchField = .title
+    @State private var searchText = ""
 
     // 再生キュー
     @State private var queue: [QueueItem] = []
@@ -346,11 +360,28 @@ struct ContentView: View {
                 // 現在開いているフォルダ
                 Section("フォルダ: \(folderName)") {
 
+                    Picker("検索対象", selection: $searchField) {
+                        ForEach(MusicSearchField.allCases) { field in
+                            Text(field.rawValue).tag(field)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+
+                    TextField("曲を検索", text: $searchText)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+
                     if isLoading {
                         ProgressView("読み込み中...")
                     }
 
-                    ForEach(files) { file in
+                    if !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        && displayedFiles.isEmpty {
+                        Text("該当する曲はありません")
+                            .foregroundStyle(.secondary)
+                    }
+
+                    ForEach(displayedFiles) { file in
 
                         let isMusic = isMusicFile(file)
 
@@ -514,6 +545,38 @@ struct ContentView: View {
         }
     }
     
+    // MARK: - 検索結果
+
+    private var displayedFiles: [OpenListFile] {
+        let keyword = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // 検索語が空なら、従来どおり全ファイルを表示
+        guard !keyword.isEmpty else {
+            return files
+        }
+
+        // メタデータ検索ではフォルダを除外
+        return files.filter { file in
+            guard !file.is_dir, isMusicFile(file) else {
+                return false
+            }
+
+            let path = makePath(for: file)
+            guard let track = musicTracks.first(where: { $0.path == path }) else {
+                return false
+            }
+
+            switch searchField {
+            case .title:
+                return track.title.localizedCaseInsensitiveContains(keyword)
+            case .artist:
+                return track.artist?.localizedCaseInsensitiveContains(keyword) ?? false
+            case .album:
+                return track.album?.localizedCaseInsensitiveContains(keyword) ?? false
+            }
+        }
+    }
+
     // MARK: - 差分ライブラリ同期
 
     private func scanLibrary() async {
