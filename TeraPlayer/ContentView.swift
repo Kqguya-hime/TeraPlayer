@@ -139,6 +139,38 @@ enum QueueSource: Equatable {
     case automatic
 }
 
+private enum QueueTargetKind: String {
+    case artist
+    case album
+}
+
+private struct QueueTarget: Identifiable {
+    let name: String
+    let kind: QueueTargetKind
+
+    var id: String {
+        "\(kind.rawValue):\(name)"
+    }
+
+    var displayKind: String {
+        kind == .artist ? "アーティスト" : "アルバム"
+    }
+}
+
+private enum QueueOperation: String, CaseIterable, Identifiable {
+    case replace = "置き換え"
+    case append = "末尾に追加"
+
+    var id: String { rawValue }
+}
+
+private struct QueueRefillCondition {
+    let targetName: String
+    let targetKind: QueueTargetKind
+    let trackPaths: Set<String>
+    let shuffle: Bool
+}
+
 // 再生キューの1項目
 struct QueueItem: Identifiable {
     let file: OpenListFile
@@ -218,6 +250,10 @@ struct ContentView: View {
     @State private var libraryBrowseMode = "曲"
     @State private var selectedArtist: String? = nil
     @State private var selectedAlbum: String? = nil
+    @State private var queueTarget: QueueTarget? = nil
+    @State private var queueShuffle = false
+    @State private var queueOperation: QueueOperation = .replace
+    @State private var activeRefillCondition: QueueRefillCondition? = nil
 
     var body: some View {
         TabView {
@@ -319,10 +355,9 @@ struct ContentView: View {
                 if libraryBrowseMode == "アーティスト" {
                     ForEach(filteredArtistNames, id: \.self) { artist in
                         Button {
-                            selectedArtist = artist
-                            selectedAlbum = nil
-                            libraryBrowseMode = "曲"
-                            searchText = ""
+                            queueShuffle = false
+                            queueOperation = .replace
+                            queueTarget = QueueTarget(name: artist, kind: .artist)
                         } label: {
                             Label(artist, systemImage: "person")
                         }
@@ -330,10 +365,9 @@ struct ContentView: View {
                 } else if libraryBrowseMode == "アルバム" {
                     ForEach(filteredAlbumNames, id: \.self) { album in
                         Button {
-                            selectedAlbum = album
-                            selectedArtist = nil
-                            libraryBrowseMode = "曲"
-                            searchText = ""
+                            queueShuffle = false
+                            queueOperation = .replace
+                            queueTarget = QueueTarget(name: album, kind: .album)
                         } label: {
                             Label(album, systemImage: "square.stack")
                         }
@@ -435,6 +469,67 @@ struct ContentView: View {
                 }
             }
         }
+        .sheet(item: $queueTarget) { target in
+            queueCreationSheet(for: target)
+        }
+    }
+
+    private func queueCreationSheet(for target: QueueTarget) -> some View {
+        let tracks = tracks(for: target)
+
+        return NavigationStack {
+            Form {
+                Section {
+                    LabeledContent("種類", value: target.displayKind)
+                    LabeledContent("対象", value: target.name)
+                    LabeledContent("対象曲数", value: "\(tracks.count) 曲")
+                }
+
+                Section("再生順") {
+                    Picker("シャッフル", selection: $queueShuffle) {
+                        Text("OFF").tag(false)
+                        Text("ON").tag(true)
+                    }
+                    .pickerStyle(.segmented)
+                }
+
+                Section("キュー操作") {
+                    Picker("操作", selection: $queueOperation) {
+                        ForEach(QueueOperation.allCases) { operation in
+                            Text(operation.rawValue).tag(operation)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+
+                    Text(queueOperation == .replace
+                         ? "現在再生中の曲はそのままにし、これから再生するキューを置き換えます。"
+                         : "現在のキューを残し、その末尾に対象曲を追加します。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
+                Section {
+                    Button {
+                        createQueue(for: target)
+                        queueTarget = nil
+                    } label: {
+                        Text("キューを作成")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .disabled(tracks.isEmpty)
+                }
+            }
+            .navigationTitle("キューを作成")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("閉じる") {
+                        queueTarget = nil
+                    }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
     }
 
     private var playbackScreen: some View {
@@ -1427,7 +1522,7 @@ struct ContentView: View {
         await loadFiles()
 
         // シャッフル中かつキューが空なら新しいフォルダから補充
-        if isShuffle && queue.isEmpty {
+        if activeRefillCondition == nil && isShuffle && queue.isEmpty {
             fillShuffleQueue()
         }
     }
@@ -1459,6 +1554,136 @@ struct ContentView: View {
 
     // MARK: - 再生キュー
 
+    // アーティスト／アルバムに属する全曲をライブラリ全体から取得
+    private func tracks(for target: QueueTarget) -> [MusicTrack] {
+        let matchingTracks = musicTracks.filter { track in
+            switch target.kind {
+            case .artist:
+                return track.artist?
+                    .trimmingCharacters(in: .whitespacesAndNewlines) == target.name
+            case .album:
+                return track.album?
+                    .trimmingCharacters(in: .whitespacesAndNewlines) == target.name
+            }
+        }
+
+        var seenPaths = Set<String>()
+        return matchingTracks
+            .filter { seenPaths.insert($0.path).inserted }
+            .sorted {
+                $0.path.localizedCaseInsensitiveCompare($1.path) == .orderedAscending
+            }
+    }
+
+    // 選択したアーティスト／アルバムからキューを作成
+    private func createQueue(for target: QueueTarget) {
+        let targetTracks = tracks(for: target)
+        let targetPaths = Set(targetTracks.map(\.path))
+
+        // 現在再生中の曲は候補から除外
+        var candidates = targetTracks.filter {
+            $0.path != currentTrack?.path
+        }
+
+        // 置き換え／追加それぞれの重複を除外
+        if queueOperation == .append {
+            let existingPaths = Set(queue.map(\.path))
+            candidates.removeAll { existingPaths.contains($0.path) }
+        }
+
+        // 対象曲がすべて再生中・キュー内などで追加できない場合は何もしない
+        guard !candidates.isEmpty else {
+            return
+        }
+
+        if queueShuffle {
+            candidates.shuffle()
+        }
+
+        let newItems = candidates.map { track in
+            QueueItem(
+                file: OpenListFile(
+                    name: track.fileName,
+                    size: track.fileSize,
+                    is_dir: false,
+                    modified: track.cloudModified,
+                    created: nil,
+                    sign: track.cloudSign,
+                    path: track.path
+                ),
+                path: track.path,
+                source: .manual
+            )
+        }
+
+        switch queueOperation {
+        case .replace:
+            queue = newItems
+        case .append:
+            queue.append(contentsOf: newItems)
+        }
+
+        // 最後に作成・追加した条件だけを自動補充条件として保持
+        activeRefillCondition = QueueRefillCondition(
+            targetName: target.name,
+            targetKind: target.kind,
+            trackPaths: targetPaths,
+            shuffle: queueShuffle
+        )
+
+        // 再生中の曲がなければ先頭から再生
+        if currentTrack == nil, !queue.isEmpty {
+            let firstItem = queue.removeFirst()
+            Task {
+                await startTrack(firstItem)
+            }
+        }
+    }
+
+    // 最後に指定されたアーティスト／アルバムからキューを補充
+    private func refillActiveConditionQueue() {
+        guard let condition = activeRefillCondition else {
+            return
+        }
+
+        let queuedPaths = Set(queue.map(\.path))
+        var candidates = musicTracks
+            .filter { condition.trackPaths.contains($0.path) }
+            .filter {
+                $0.path != currentTrack?.path
+                    && !queuedPaths.contains($0.path)
+            }
+            .sorted {
+                $0.path.localizedCaseInsensitiveCompare($1.path) == .orderedAscending
+            }
+
+        guard !candidates.isEmpty else {
+            return
+        }
+
+        if condition.shuffle {
+            candidates.shuffle()
+        }
+
+        let items = candidates.map { track in
+            QueueItem(
+                file: OpenListFile(
+                    name: track.fileName,
+                    size: track.fileSize,
+                    is_dir: false,
+                    modified: track.cloudModified,
+                    created: nil,
+                    sign: track.cloudSign,
+                    path: track.path
+                ),
+                path: track.path,
+                source: .automatic
+            )
+        }
+
+        queue.append(contentsOf: items)
+    }
+
     // 曲を選択したときの処理
     private func enqueueOrPlay(_ file: OpenListFile) {
 
@@ -1468,6 +1693,9 @@ struct ContentView: View {
         if currentTrack?.path == path {
             return
         }
+
+        // 通常の曲選択ではアーティスト／アルバムの自動補充を解除
+        activeRefillCondition = nil
 
         // すでにキューに存在する場合は削除
         queue.removeAll {
@@ -1491,7 +1719,7 @@ struct ContentView: View {
             Task {
                 let success = await startTrack(firstItem)
 
-                if success && isShuffle {
+                if success && activeRefillCondition == nil && isShuffle {
                     fillShuffleQueue()
                 }
             }
@@ -1541,8 +1769,23 @@ struct ContentView: View {
 
     // キューから曲を削除
     private func deleteQueueItems(at offsets: IndexSet) {
+        guard !offsets.isEmpty else { return }
+
+        let conditionPaths = activeRefillCondition?.trackPaths ?? []
+        let hadConditionTracksInQueue = queue.contains {
+            conditionPaths.contains($0.path)
+        }
 
         queue.remove(atOffsets: offsets)
+
+        // 条件に属するキュー曲をすべて手動削除した場合は自動補充を解除
+        let hasConditionTracksRemaining = queue.contains {
+            conditionPaths.contains($0.path)
+        }
+
+        if hadConditionTracksInQueue && !hasConditionTracksRemaining {
+            activeRefillCondition = nil
+        }
     }
 
     // ランダム選曲
@@ -1599,7 +1842,7 @@ struct ContentView: View {
         isShuffle.toggle()
 
         // ONにした場合だけ自動補充
-        if isShuffle {
+        if isShuffle && activeRefillCondition == nil {
             fillShuffleQueue()
         }
     }
@@ -1736,9 +1979,13 @@ struct ContentView: View {
             queue.append(repeatedTrack)
         }
 
-        // シャッフルONでキューが空なら補充
-        if queue.isEmpty && isShuffle {
-            fillShuffleQueue()
+        // キューが空になった時点で、最後に指定された条件を優先して補充
+        if queue.isEmpty {
+            if activeRefillCondition != nil {
+                refillActiveConditionQueue()
+            } else if isShuffle {
+                fillShuffleQueue()
+            }
         }
 
         // 次の曲がない場合
