@@ -1532,7 +1532,7 @@ struct ContentView: View {
                 : "トークンを登録してください。"
         } catch {
             isOpenListTokenConfigured = false
-            openListTokenStatus = "Keychainを読み取れませんでした: \\(error.localizedDescription)"
+            openListTokenStatus = "Keychainを読み取れませんでした: \(error.localizedDescription)"
         }
     }
 
@@ -1546,7 +1546,7 @@ struct ContentView: View {
             isOpenListTokenConfigured = true
             openListTokenStatus = "トークンを端末内のKeychainに保存しました。"
         } catch {
-            openListTokenStatus = "トークンを保存できませんでした: \\(error.localizedDescription)"
+            openListTokenStatus = "トークンを保存できませんでした: \(error.localizedDescription)"
         }
     }
 
@@ -1557,7 +1557,7 @@ struct ContentView: View {
             isOpenListTokenConfigured = false
             openListTokenStatus = "保存済みトークンを削除しました。"
         } catch {
-            openListTokenStatus = "トークンを削除できませんでした: \\(error.localizedDescription)"
+            openListTokenStatus = "トークンを削除できませんでした: \(error.localizedDescription)"
         }
     }
 
