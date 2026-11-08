@@ -218,6 +218,9 @@ struct ContentView: View {
     @State private var isPlaying = false
     @State private var nowPlayingManager = NowPlayingManager()
     @State private var timeObserverToken: Any? = nil
+    @State private var elapsedTime: Double = 0
+    @State private var playbackDuration: Double = 0
+    @State private var isSeeking = false
     // 再生設定
     @State private var isShuffle = false
     @State private var repeatMode: RepeatMode = .off
@@ -610,6 +613,33 @@ struct ContentView: View {
                                     .foregroundStyle(.tertiary)
                             }
                             .frame(maxWidth: .infinity)
+
+                            VStack(spacing: 4) {
+                                Slider(
+                                    value: $elapsedTime,
+                                    in: 0...max(playbackDuration, 1),
+                                    onEditingChanged: { isEditing in
+                                        isSeeking = isEditing
+
+                                        if !isEditing {
+                                            seekPlayback(to: elapsedTime)
+                                        }
+                                    }
+                                )
+                                .disabled(playbackDuration <= 0)
+
+                                HStack {
+                                    Text(formattedTime(elapsedTime))
+                                    Spacer()
+                                    Text(
+                                        playbackDuration > 0
+                                            ? formattedTime(playbackDuration)
+                                            : "--:--"
+                                    )
+                                }
+                                .font(.caption.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                            }
 
                             HStack(spacing: 34) {
                                 Button {
@@ -1568,17 +1598,7 @@ struct ContentView: View {
         }
 
         nowPlayingManager.onSeek = { seconds in
-
-            let time = CMTime(
-                seconds: seconds,
-                preferredTimescale: 600
-            )
-
-            player.seek(to: time) { _ in
-                Task { @MainActor in
-                    updateNowPlayingInfo()
-                }
-            }
+            seekPlayback(to: seconds)
         }
 
         nowPlayingManager.configure()
@@ -1589,13 +1609,56 @@ struct ContentView: View {
             timeObserverToken = player.addPeriodicTimeObserver(
                 forInterval: CMTime(seconds: 1, preferredTimescale: 600),
                 queue: .main
-            ) { _ in
+            ) { time in
 
                 Task { @MainActor in
+                    let seconds = time.seconds
+                    let duration = player.currentItem?.duration.seconds ?? 0
+
+                    if duration.isFinite && duration > 0 {
+                        playbackDuration = duration
+                    } else {
+                        playbackDuration = 0
+                    }
+
+                    if !isSeeking && seconds.isFinite {
+                        elapsedTime = max(0, seconds)
+                    }
+
                     updateNowPlayingInfo()
                 }
             }
         }
+    }
+
+    // 再生位置を変更
+    private func seekPlayback(to seconds: Double) {
+        guard playbackDuration > 0 else { return }
+
+        let targetSeconds = min(max(seconds, 0), playbackDuration)
+        let time = CMTime(
+            seconds: targetSeconds,
+            preferredTimescale: 600
+        )
+
+        player.seek(to: time) { _ in
+            Task { @MainActor in
+                elapsedTime = targetSeconds
+                updateNowPlayingInfo()
+            }
+        }
+    }
+
+    // 秒数を「分:秒」の形式に変換
+    private func formattedTime(_ seconds: Double) -> String {
+        guard seconds.isFinite else { return "--:--" }
+
+        let totalSeconds = Int(max(0, seconds))
+        return String(
+            format: "%d:%02d",
+            totalSeconds / 60,
+            totalSeconds % 60
+        )
     }
 
     // ロック画面に表示する情報を更新
@@ -2077,6 +2140,9 @@ struct ContentView: View {
             )
 
             currentTrack = item
+            elapsedTime = 0
+            playbackDuration = 0
+            isSeeking = false
 
             player.play()
             isPlaying = true
