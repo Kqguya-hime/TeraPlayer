@@ -631,7 +631,7 @@ struct ContentView: View {
                                         repeatMode == .one ? "1曲リピート" : "リピート",
                                         systemImage: repeatIcon
                                     )
-                                    .foregroundStyle(repeatMode == .off ? .secondary : .blue)
+                                    .foregroundColor(repeatMode == .off ? .secondary : .blue)
                                 }
                             }
                             .font(.caption)
