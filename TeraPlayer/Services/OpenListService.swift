@@ -14,7 +14,7 @@ final class OpenListService {
     private let baseURL = "http://192.168.0.10:5244"
 
     // OpenListで新しく発行したトークンを設定する
-    private let token = "openlist-942de10f-df2a-4224-84a4-5a725634e9c8p05uhAv6wIs9CXMJRkiHGcI0aFYvekuulyGmLETMAOSghxDZvBX6f57Jw7FOcDKt"
+    private let token = ""
 
     // MARK: - エラー定義
 
