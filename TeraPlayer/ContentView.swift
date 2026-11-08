@@ -181,6 +181,7 @@ private struct ArtistStatistic: Identifiable {
 enum QueueSource: Equatable {
     case manual
     case automatic
+    case playlist
 }
 
 private enum QueueTargetKind: String {
@@ -242,6 +243,11 @@ struct ContentView: View {
     @State private var selectedTrackPathsToAdd: [String] = []
     @State private var playlistTrackSearchField: MusicSearchField = .title
     @State private var playlistTrackSearchText = ""
+    @State private var isPlaylistPlaybackSheetPresented = false
+    @State private var playlistPlaybackTargetID: String? = nil
+    @State private var playlistPlaybackOperation: QueueOperation = .replace
+    @State private var playlistPlaybackShuffle = false
+    @State private var isPlaylistPlayback = false
 
     // ライブラリスキャンの状態
     @State private var isScanningLibrary = false
@@ -770,6 +776,17 @@ struct ContentView: View {
         List {
             Section {
                 HStack {
+                    Button {
+                        playlistPlaybackTargetID = playlist.id
+                        playlistPlaybackOperation = .replace
+                        playlistPlaybackShuffle = false
+                        isPlaylistPlaybackSheetPresented = true
+                    } label: {
+                        Label("プレイリストを再生", systemImage: "play.fill")
+                    }
+                    .buttonStyle(.borderedProminent)
+
+                    Spacer()
                     EditButton()
                     Spacer()
                     Button {
@@ -828,6 +845,128 @@ struct ContentView: View {
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $isPlaylistTrackPickerPresented) {
             playlistTrackPickerSheet
+        }
+        .sheet(isPresented: $isPlaylistPlaybackSheetPresented) {
+            playlistPlaybackSheet
+        }
+    }
+
+    private var playlistPlaybackSheet: some View {
+        NavigationStack {
+            Form {
+                Section("再生順") {
+                    Picker("シャッフル", selection: $playlistPlaybackShuffle) {
+                        Text("OFF（登録順）").tag(false)
+                        Text("ON（ランダム）").tag(true)
+                    }
+                    .pickerStyle(.segmented)
+                }
+
+                Section("キュー操作") {
+                    Picker("操作", selection: $playlistPlaybackOperation) {
+                        ForEach(QueueOperation.allCases) { operation in
+                            Text(operation.rawValue).tag(operation)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+
+                    Text(playlistPlaybackOperation == .replace
+                         ? "現在再生中の曲は維持し、次の再生キューを置き換えます。"
+                         : "現在のキューを維持し、プレイリストの曲を末尾に追加します。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle("プレイリスト再生")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("キャンセル") {
+                        isPlaylistPlaybackSheetPresented = false
+                    }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("再生") {
+                        startPlaylistPlayback()
+                    }
+                    .disabled(playlistPlaybackTargetID == nil)
+                }
+            }
+        }
+        .presentationDetents([.medium])
+    }
+
+    private func startPlaylistPlayback() {
+        guard let playlistID = playlistPlaybackTargetID,
+              let playlist = playlists.first(where: { $0.id == playlistID }) else {
+            return
+        }
+
+        let existingPaths = Set(queue.map(\\.path))
+        var candidatePaths = playlist.trackPaths.filter { path in
+            path != currentTrack?.path
+        }
+
+        if playlistPlaybackOperation == .append {
+            candidatePaths.removeAll { existingPaths.contains($0) }
+        }
+
+        // ライブラリから消えた曲は再生対象に含めない
+        let tracksByPath = Dictionary(uniqueKeysWithValues: musicTracks.map { ($0.path, $0) })
+        candidatePaths = candidatePaths.filter { tracksByPath[$0] != nil }
+
+        // 同一プレイリスト内の重複パスも除外
+        var seenPaths = Set<String>()
+        candidatePaths = candidatePaths.filter { seenPaths.insert($0).inserted }
+
+        if playlistPlaybackShuffle {
+            candidatePaths.shuffle()
+        }
+
+        let newItems = candidatePaths.compactMap { path -> QueueItem? in
+            guard let track = tracksByPath[path] else { return nil }
+            return QueueItem(
+                file: OpenListFile(
+                    name: track.fileName,
+                    size: track.fileSize,
+                    is_dir: false,
+                    modified: track.cloudModified,
+                    created: nil,
+                    sign: track.cloudSign,
+                    path: track.path
+                ),
+                path: track.path,
+                source: .playlist
+            )
+        }
+
+        guard !newItems.isEmpty else {
+            isPlaylistPlaybackSheetPresented = false
+            playlistPlaybackTargetID = nil
+            return
+        }
+
+        activeRefillCondition = nil
+        isPlaylistPlayback = true
+
+        switch playlistPlaybackOperation {
+        case .replace:
+            queue = newItems
+        case .append:
+            queue.append(contentsOf: newItems)
+        }
+
+        isPlaylistPlaybackSheetPresented = false
+        playlistPlaybackTargetID = nil
+
+        if currentTrack == nil, !queue.isEmpty {
+            let firstItem = queue.removeFirst()
+            Task {
+                let success = await startTrack(firstItem)
+                if !success {
+                    queue.insert(firstItem, at: 0)
+                }
+            }
         }
     }
 
@@ -2402,6 +2541,7 @@ struct ContentView: View {
 
     // 選択したアーティスト／アルバムからキューを作成
     private func createQueue(for target: QueueTarget) {
+        isPlaylistPlayback = false
         let targetTracks = tracks(for: target)
         let targetPaths = Set(targetTracks.map(\.path))
 
@@ -2519,7 +2659,8 @@ struct ContentView: View {
             return
         }
 
-        // 通常の曲選択ではアーティスト／アルバムの自動補充を解除
+        // 通常の曲選択ではプレイリスト再生・アーティスト／アルバムの自動補充を解除
+        isPlaylistPlayback = false
         activeRefillCondition = nil
 
         // すでにキューに存在する場合は削除
@@ -2565,6 +2706,7 @@ struct ContentView: View {
         selectedItem.source = .manual
 
         // キューから通常の曲を選んだ場合は自動補充条件を解除
+        isPlaylistPlayback = false
         activeRefillCondition = nil
 
         queue.insert(selectedItem, at: 0)
@@ -2930,8 +3072,8 @@ struct ContentView: View {
             queue.append(repeatedTrack)
         }
 
-        // キューが空になった時点で、最後に指定された条件を優先して補充
-        if queue.isEmpty {
+        // プレイリスト再生中は、プレイリスト外の自動選曲を行わない
+        if queue.isEmpty && !isPlaylistPlayback {
             if activeRefillCondition != nil {
                 refillActiveConditionQueue()
             } else if isShuffle {
@@ -2942,6 +3084,7 @@ struct ContentView: View {
         // 次の曲がない場合
         guard !queue.isEmpty else {
             isPlaying = false
+            isPlaylistPlayback = false
             return
         }
 
