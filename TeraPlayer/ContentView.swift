@@ -762,13 +762,13 @@ struct ContentView: View {
             editingPlaylistID = nil
             playlistNameDraft = ""
         } catch {
-            errorMessage = "プレイリストを保存できませんでした: \\(error.localizedDescription)"
+            errorMessage = "プレイリストを保存できませんでした: \(error.localizedDescription)"
         }
     }
 
     private func playlistDetailScreen(_ playlist: MusicPlaylist) -> some View {
         List {
-            Section("曲一覧（\\(playlist.trackPaths.count)曲）") {
+            Section("曲一覧（\(playlist.trackPaths.count)曲）") {
                 if playlist.trackPaths.isEmpty {
                     Text("曲が登録されていません")
                         .foregroundStyle(.secondary)
