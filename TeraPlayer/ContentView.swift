@@ -314,22 +314,26 @@ struct ContentView: View {
     var body: some View {
         TabView(selection: $selectedTab) {
             libraryScreen
-                .tabItem {
-                    Label("楽曲", systemImage: "music.note.list")
-                }
                 .tag(0)
 
             playbackScreen
-                .tabItem {
-                    Label("再生", systemImage: "play.circle")
-                }
                 .tag(1)
 
             managementScreen
-                .tabItem {
-                    Label("管理", systemImage: "slider.horizontal.3")
-                }
                 .tag(2)
+        }
+        .tabViewStyle(.automatic)
+        .toolbar(.hidden, for: .tabBar)
+        .safeAreaInset(edge: .top, spacing: 0) {
+            Picker("画面", selection: $selectedTab) {
+                Text("楽曲").tag(0)
+                Text("再生").tag(1)
+                Text("管理").tag(2)
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal)
+            .padding(.vertical, 8)
+            .background(.bar)
         }
         .safeAreaInset(edge: .bottom) {
             playerControls
