@@ -221,6 +221,11 @@ struct ContentView: View {
     @State private var elapsedTime: Double = 0
     @State private var playbackDuration: Double = 0
     @State private var isSeeking = false
+
+    // 統計用の現在の再生セッション
+    @State private var activePlaybackHistory: PlaybackHistory? = nil
+    @State private var lastObservedPlaybackTime: Double? = nil
+    @State private var unsavedHistorySeconds: Double = 0
     // 再生設定
     @State private var isShuffle = false
     @State private var repeatMode: RepeatMode = .off
@@ -319,6 +324,12 @@ struct ContentView: View {
             }
         }
         .onChange(of: scenePhase) { _, phase in
+            if phase != .active {
+                // バックグラウンドへ移る前に再生時間を保存
+                checkpointPlaybackSession()
+                lastObservedPlaybackTime = nil
+            }
+
             if phase == .active && networkMonitor.isWiFiConnected {
                 print("アプリ復帰：Wi-Fi接続中のため自動同期")
                 Task {
@@ -1163,6 +1174,27 @@ struct ContentView: View {
                     try? store.deleteFile(localFileName)
                 }
 
+                // ライブラリから削除された曲の再生統計も削除
+                let deletedPath = oldTrack.path
+                let historyDescriptor = FetchDescriptor<PlaybackHistory>(
+                    predicate: #Predicate { history in
+                        history.trackPath == deletedPath
+                    }
+                )
+
+                if let histories = try? syncContext.fetch(historyDescriptor) {
+                    for history in histories {
+                        syncContext.delete(history)
+                    }
+                }
+
+                // 削除対象が現在の再生セッションなら、以後の記録を停止
+                if activePlaybackHistory?.trackPath == deletedPath {
+                    activePlaybackHistory = nil
+                    lastObservedPlaybackTime = nil
+                    unsavedHistorySeconds = 0
+                }
+
                 syncContext.delete(oldTrack)
                 deletedCount += 1
             }
@@ -1624,6 +1656,9 @@ struct ContentView: View {
                     if !isSeeking && seconds.isFinite {
                         elapsedTime = max(0, seconds)
                     }
+
+                    // 実際に再生していた時間だけを加算する
+                    recordPlaybackProgress(at: seconds)
 
                     updateNowPlayingInfo()
                 }
@@ -2130,10 +2165,13 @@ struct ContentView: View {
                 )
             }
 
-            // 正常に取得できた場合だけ履歴に登録
+            // 正常に取得できた場合だけ、戻るための履歴に登録
             if recordHistory, let previousTrack = currentTrack {
                 playHistory.append(previousTrack)
             }
+
+            // 前の再生セッションを未完了として保存
+            finishPlaybackSession(completed: false)
 
             player.replaceCurrentItem(
                 with: AVPlayerItem(url: musicURL)
@@ -2146,7 +2184,11 @@ struct ContentView: View {
 
             player.play()
             isPlaying = true
-            
+
+            // 新しい再生セッションを開始して統計に記録
+            beginPlaybackSession(trackPath: item.path)
+            lastObservedPlaybackTime = nil
+
             updateNowPlayingInfo()
 
             return true
@@ -2160,13 +2202,126 @@ struct ContentView: View {
         }
     }
 
+    // MARK: - 再生統計の記録
+
+    // 新しい再生セッションを作成する
+    private func beginPlaybackSession(trackPath: String) {
+
+        let history = PlaybackHistory(trackPath: trackPath)
+        modelContext.insert(history)
+        activePlaybackHistory = history
+        lastObservedPlaybackTime = nil
+        unsavedHistorySeconds = 0
+
+        // 再生開始時点で再生回数を加算
+        let descriptor = FetchDescriptor<MusicTrack>(
+            predicate: #Predicate { track in
+                track.path == trackPath
+            }
+        )
+
+        do {
+            if let track = try modelContext.fetch(descriptor).first {
+                track.playCount += 1
+                track.lastPlayed = Date()
+            }
+
+            try modelContext.save()
+        } catch {
+            print("再生履歴の開始保存に失敗: \(error.localizedDescription)")
+        }
+    }
+
+    // AVPlayerの再生位置の差分から、実再生時間を加算する
+    private func recordPlaybackProgress(at currentTime: Double) {
+
+        guard currentTime.isFinite else { return }
+
+        defer {
+            lastObservedPlaybackTime = currentTime
+        }
+
+        guard isPlaying,
+              let history = activePlaybackHistory,
+              let previousTime = lastObservedPlaybackTime else {
+            return
+        }
+
+        let delta = currentTime - previousTime
+
+        // 1秒間隔の監視で大きな差が出た場合は、
+        // シークや一時停止・復帰による変化とみなして加算しない
+        guard delta > 0, delta <= 2.5 else {
+            return
+        }
+
+        history.listenedSeconds += delta
+        history.lastUpdatedAt = Date()
+        unsavedHistorySeconds += delta
+
+        // 約10秒ごとに途中経過を保存
+        if unsavedHistorySeconds >= 10 {
+            checkpointPlaybackSession()
+        }
+    }
+
+    // 現在のセッションの途中経過を保存する
+    private func checkpointPlaybackSession() {
+
+        guard let history = activePlaybackHistory else { return }
+        guard unsavedHistorySeconds > 0 else { return }
+
+        history.lastUpdatedAt = Date()
+
+        do {
+            try modelContext.save()
+            unsavedHistorySeconds = 0
+        } catch {
+            print("再生時間の途中保存に失敗: \(error.localizedDescription)")
+        }
+    }
+
+    // セッションを終了する。自然終了時だけ完了扱いにする
+    private func finishPlaybackSession(completed: Bool) {
+
+        guard let history = activePlaybackHistory else { return }
+
+        checkpointPlaybackSession()
+
+        if completed {
+            history.completed = true
+            history.lastUpdatedAt = Date()
+        }
+
+        do {
+            try modelContext.save()
+        } catch {
+            print("再生履歴の終了保存に失敗: \(error.localizedDescription)")
+        }
+
+        activePlaybackHistory = nil
+        lastObservedPlaybackTime = nil
+        unsavedHistorySeconds = 0
+    }
+
     // 次の曲を再生
     private func playNext(isNaturalEnd: Bool = false) async {
+
+        // 自然終了したセッションは完了として確定
+        if isNaturalEnd {
+            finishPlaybackSession(completed: true)
+        }
 
         // 1曲リピートは自然終了時だけ適用
         if isNaturalEnd && repeatMode == .one {
 
+            // リピートも新しい再生セッションとして記録
+            if let track = currentTrack {
+                beginPlaybackSession(trackPath: track.path)
+            }
+
             await player.seek(to: .zero)
+            lastObservedPlaybackTime = nil
             player.play()
             isPlaying = true
 
@@ -2243,11 +2398,15 @@ struct ContentView: View {
 
         if isPlaying {
 
+            // 一時停止直前までの再生時間を保存
+            checkpointPlaybackSession()
+            lastObservedPlaybackTime = nil
             player.pause()
             isPlaying = false
 
         } else if player.currentItem != nil {
 
+            lastObservedPlaybackTime = nil
             player.play()
             isPlaying = true
         }
