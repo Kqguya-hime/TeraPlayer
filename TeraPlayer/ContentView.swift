@@ -237,6 +237,9 @@ struct ContentView: View {
     @State private var isPlaylistEditorPresented = false
     @State private var editingPlaylistID: String? = nil
     @State private var playlistNameDraft = ""
+    @State private var isPlaylistTrackPickerPresented = false
+    @State private var addingTracksToPlaylistID: String? = nil
+    @State private var selectedTrackPathsToAdd: [String] = []
 
     // ライブラリスキャンの状態
     @State private var isScanningLibrary = false
@@ -774,8 +777,7 @@ struct ContentView: View {
                         .foregroundStyle(.secondary)
                 }
 
-                ForEach(playlist.trackPaths.indices, id: \.self) { index in
-                    let path = playlist.trackPaths[index]
+                ForEach(playlist.trackPaths, id: \.self) { path in
                     if let track = musicTracks.first(where: { $0.path == path }) {
                         VStack(alignment: .leading, spacing: 3) {
                             Text(track.title)
@@ -785,12 +787,167 @@ struct ContentView: View {
                                     .foregroundStyle(.secondary)
                             }
                         }
+                    } else {
+                        Text("ライブラリに存在しない曲")
+                            .foregroundStyle(.secondary)
                     }
+                }
+                .onMove { source, destination in
+                    movePlaylistTracks(
+                        in: playlist,
+                        from: source,
+                        to: destination
+                    )
+                }
+                .onDelete { offsets in
+                    removePlaylistTracks(
+                        from: playlist,
+                        at: offsets
+                    )
                 }
             }
         }
         .navigationTitle(playlist.name)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                EditButton()
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    addingTracksToPlaylistID = playlist.id
+                    selectedTrackPathsToAdd = []
+                    isPlaylistTrackPickerPresented = true
+                } label: {
+                    Image(systemName: "plus")
+                }
+                .accessibilityLabel("曲を追加")
+            }
+        }
+        .sheet(isPresented: $isPlaylistTrackPickerPresented) {
+            playlistTrackPickerSheet
+        }
+    }
+
+    private var playlistTrackPickerSheet: some View {
+        NavigationStack {
+            List {
+                if let playlist = playlists.first(where: {
+                    $0.id == addingTracksToPlaylistID
+                }) {
+                    ForEach(
+                        musicTracks.sorted {
+                            $0.title.localizedStandardCompare($1.title) == .orderedAscending
+                        },
+                        id: \.path
+                    ) { track in
+                        let alreadyAdded = playlist.trackPaths.contains(track.path)
+                        let isSelected = selectedTrackPathsToAdd.contains(track.path)
+
+                        Button {
+                            guard !alreadyAdded else { return }
+                            if isSelected {
+                                selectedTrackPathsToAdd.removeAll { $0 == track.path }
+                            } else {
+                                selectedTrackPathsToAdd.append(track.path)
+                            }
+                        } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(track.title)
+                                        .foregroundStyle(.primary)
+                                    if let artist = track.artist, !artist.isEmpty {
+                                        Text(artist)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                                Spacer()
+                                if alreadyAdded {
+                                    Text("登録済み")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                } else if isSelected {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .foregroundStyle(.blue)
+                                } else {
+                                    Image(systemName: "circle")
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(alreadyAdded)
+                    }
+                } else {
+                    Text("プレイリストが見つかりません")
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle("曲を追加")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("キャンセル") {
+                        isPlaylistTrackPickerPresented = false
+                    }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("追加（\(selectedTrackPathsToAdd.count)曲）") {
+                        addSelectedTracksToPlaylist()
+                    }
+                    .disabled(selectedTrackPathsToAdd.isEmpty)
+                }
+            }
+        }
+    }
+
+    private func addSelectedTracksToPlaylist() {
+        guard let playlist = playlists.first(where: {
+            $0.id == addingTracksToPlaylistID
+        }) else {
+            return
+        }
+
+        let existingPaths = Set(playlist.trackPaths)
+        let newPaths = selectedTrackPathsToAdd.filter {
+            !existingPaths.contains($0)
+        }
+
+        playlist.trackPaths.append(contentsOf: newPaths)
+        playlist.updatedAt = Date()
+
+        do {
+            try modelContext.save()
+            isPlaylistTrackPickerPresented = false
+            selectedTrackPathsToAdd = []
+            addingTracksToPlaylistID = nil
+        } catch {
+            errorMessage = "曲を追加できませんでした: \(error.localizedDescription)"
+        }
+    }
+
+    private func removePlaylistTracks(
+        from playlist: MusicPlaylist,
+        at offsets: IndexSet
+    ) {
+        playlist.trackPaths.remove(atOffsets: offsets)
+        playlist.updatedAt = Date()
+        try? modelContext.save()
+    }
+
+    private func movePlaylistTracks(
+        in playlist: MusicPlaylist,
+        from source: IndexSet,
+        to destination: Int
+    ) {
+        playlist.trackPaths.move(
+            fromOffsets: source,
+            toOffset: destination
+        )
+        playlist.updatedAt = Date()
+        try? modelContext.save()
     }
 
     private var playbackScreen: some View {
