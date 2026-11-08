@@ -3031,7 +3031,7 @@ struct ContentView: View {
             }
         }
 
-        let excludedPaths = Set(queue.map(\\.path)).union(
+        let excludedPaths = Set(queue.map(\.path)).union(
             currentTrack.map { [$0.path] } ?? []
         )
         let candidates = unplayedTracks.filter {
