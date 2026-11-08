@@ -658,6 +658,16 @@ struct ContentView: View {
         NavigationStack {
             List {
                 Section("自作プレイリスト") {
+                    Button {
+                        editingPlaylistID = nil
+                        playlistNameDraft = ""
+                        isPlaylistEditorPresented = true
+                    } label: {
+                        Label("新規プレイリストを作成", systemImage: "plus")
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .buttonStyle(.borderedProminent)
+
                     if playlists.isEmpty {
                         Text("プレイリストはまだありません")
                             .foregroundStyle(.secondary)
@@ -702,18 +712,6 @@ struct ContentView: View {
                 }
             }
             .navigationTitle("プレイリスト")
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        editingPlaylistID = nil
-                        playlistNameDraft = ""
-                        isPlaylistEditorPresented = true
-                    } label: {
-                        Image(systemName: "plus")
-                    }
-                    .accessibilityLabel("プレイリストを作成")
-                }
-            }
         }
         .sheet(isPresented: $isPlaylistEditorPresented) {
             playlistEditorSheet
