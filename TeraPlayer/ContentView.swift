@@ -2,6 +2,7 @@ import SwiftUI
 import AVFoundation
 import MediaPlayer
 import SwiftData
+import Charts
 
 @MainActor
 final class NowPlayingManager {
@@ -133,6 +134,49 @@ private enum MusicSearchField: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+// 統計の集計期間
+private enum StatisticsPeriod: String, CaseIterable, Identifiable {
+    case all = "全期間"
+    case week = "過去7日"
+    case month = "過去1か月"
+    case year = "過去1年"
+
+    var id: String { rawValue }
+
+    func startDate(from now: Date = Date()) -> Date? {
+        let calendar = Calendar.current
+
+        switch self {
+        case .all:
+            return nil
+        case .week:
+            return calendar.date(byAdding: .day, value: -7, to: now)
+        case .month:
+            return calendar.date(byAdding: .month, value: -1, to: now)
+        case .year:
+            return calendar.date(byAdding: .year, value: -1, to: now)
+        }
+    }
+}
+
+private struct TrackStatistic: Identifiable {
+    let path: String
+    let title: String
+    let artist: String?
+    let playCount: Int
+    let listenedSeconds: Double
+    let completionCount: Int
+
+    var id: String { path }
+}
+
+private struct ArtistStatistic: Identifiable {
+    let name: String
+    let playCount: Int
+
+    var id: String { name }
+}
+
 // キュー内の曲が手動追加か自動選曲かを区別する
 enum QueueSource: Equatable {
     case manual
@@ -187,6 +231,8 @@ struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.scenePhase) private var scenePhase
     @Query private var musicTracks: [MusicTrack]
+    @Query private var playbackHistories: [PlaybackHistory]
+    @State private var statisticsPeriod: StatisticsPeriod = .all
 
     // ライブラリスキャンの状態
     @State private var isScanningLibrary = false
@@ -770,6 +816,14 @@ struct ContentView: View {
     private var managementScreen: some View {
         NavigationStack {
             List {
+                Section("再生統計") {
+                    NavigationLink {
+                        statisticsScreen
+                    } label: {
+                        Label("再生統計を見る", systemImage: "chart.bar.xaxis")
+                    }
+                }
+
                 Section("音楽ライブラリ") {
                     if isScanningLibrary {
                         ProgressView(libraryScanStatus)
@@ -845,6 +899,176 @@ struct ContentView: View {
             }
             .navigationTitle("管理")
         }
+    }
+
+    // MARK: - 再生統計
+
+    private var statisticsScreen: some View {
+        List {
+            Section {
+                Picker("集計期間", selection: $statisticsPeriod) {
+                    ForEach(StatisticsPeriod.allCases) { period in
+                        Text(period.rawValue).tag(period)
+                    }
+                }
+                .pickerStyle(.segmented)
+            }
+
+            Section("再生回数 TOP 10") {
+                if trackStatistics.isEmpty {
+                    ContentUnavailableView(
+                        "再生履歴がありません",
+                        systemImage: "chart.bar",
+                        description: Text("曲を再生すると、ここに統計が表示されます")
+                    )
+                } else {
+                    Chart(trackStatistics) { item in
+                        BarMark(
+                            x: .value("再生回数", item.playCount),
+                            y: .value("楽曲", item.title)
+                        )
+                        .foregroundStyle(.blue)
+                    }
+                    .chartXAxisLabel("再生回数")
+                    .frame(height: CGFloat(max(trackStatistics.count * 34, 180)))
+
+                    ForEach(Array(trackStatistics.enumerated()), id: \.element.id) { index, item in
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack {
+                                Text("\(index + 1). \(item.title)")
+                                    .font(.subheadline)
+                                    .lineLimit(1)
+                                Spacer()
+                                Text("\(item.playCount)回")
+                                    .font(.subheadline.monospacedDigit())
+                            }
+
+                            if let artist = item.artist, !artist.isEmpty {
+                                Text(artist)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+
+                            HStack(spacing: 14) {
+                                Label(
+                                    formattedListeningTime(item.listenedSeconds),
+                                    systemImage: "clock"
+                                )
+                                Label(
+                                    "完了 \(item.completionCount)回",
+                                    systemImage: "checkmark.circle"
+                                )
+                            }
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        }
+                        .padding(.vertical, 3)
+                    }
+                }
+            }
+
+            Section("アーティスト再生ランキング TOP 10") {
+                if artistStatistics.isEmpty {
+                    Text("アーティスト情報のある再生履歴がありません")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(Array(artistStatistics.enumerated()), id: \.element.id) { index, item in
+                        HStack {
+                            Text("\(index + 1).")
+                                .foregroundStyle(.secondary)
+                                .frame(width: 28, alignment: .leading)
+                            Text(item.name)
+                                .lineLimit(1)
+                            Spacer()
+                            Text("\(item.playCount)回")
+                                .monospacedDigit()
+                        }
+                    }
+                }
+            }
+        }
+        .navigationTitle("再生統計")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private var filteredPlaybackHistories: [PlaybackHistory] {
+        guard let startDate = statisticsPeriod.startDate() else {
+            return playbackHistories
+        }
+
+        return playbackHistories.filter { $0.startedAt >= startDate }
+    }
+
+    private var trackStatistics: [TrackStatistic] {
+        let tracksByPath = Dictionary(
+            musicTracks.map { ($0.path, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+
+        let grouped = Dictionary(grouping: filteredPlaybackHistories, by: \.trackPath)
+
+        return grouped.compactMap { path, histories in
+            guard let track = tracksByPath[path] else { return nil }
+
+            return TrackStatistic(
+                path: path,
+                title: track.title,
+                artist: track.artist,
+                playCount: histories.count,
+                listenedSeconds: histories.reduce(0) { $0 + $1.listenedSeconds },
+                completionCount: histories.filter(\.completed).count
+            )
+        }
+        .sorted {
+            if $0.playCount != $1.playCount {
+                return $0.playCount > $1.playCount
+            }
+            return $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
+        }
+        .prefix(10)
+        .map { $0 }
+    }
+
+    private var artistStatistics: [ArtistStatistic] {
+        let tracksByPath = Dictionary(
+            musicTracks.map { ($0.path, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+
+        var counts: [String: Int] = [:]
+
+        for history in filteredPlaybackHistories {
+            guard let artist = tracksByPath[history.trackPath]?.artist?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+                  !artist.isEmpty else {
+                continue
+            }
+
+            counts[artist, default: 0] += 1
+        }
+
+        return counts.map {
+            ArtistStatistic(name: $0.key, playCount: $0.value)
+        }
+        .sorted {
+            if $0.playCount != $1.playCount {
+                return $0.playCount > $1.playCount
+            }
+            return $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+        }
+        .prefix(10)
+        .map { $0 }
+    }
+
+    private func formattedListeningTime(_ seconds: Double) -> String {
+        let totalSeconds = max(0, Int(seconds))
+        let hours = totalSeconds / 3600
+        let minutes = (totalSeconds % 3600) / 60
+
+        if hours > 0 {
+            return "\(hours)時間\(minutes)分"
+        }
+        return "\(minutes)分"
     }
 
     // MARK: - 検索
