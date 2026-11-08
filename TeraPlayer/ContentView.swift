@@ -799,7 +799,7 @@ struct ContentView: View {
                 Button {
                     editingPlaylistID = nil
                     playlistNameDraft = "よく聴く曲"
-                    pendingPlaylistTrackPaths = personalizedTrackStatistics.map(\\.path)
+                    pendingPlaylistTrackPaths = personalizedTrackStatistics.map(\.path)
                     isPlaylistEditorPresented = true
                 } label: {
                     Label("自作プレイリストにコピー", systemImage: "doc.on.doc")
@@ -818,13 +818,14 @@ struct ContentView: View {
                     Text("再生履歴がありません")
                         .foregroundStyle(.secondary)
                 } else {
-                    ForEach(Array(personalizedTrackStatistics.enumerated()), id: \\.element.path) { index, item in
+                    ForEach(personalizedTrackStatistics.indices, id: \.self) { index in
+                        let item = personalizedTrackStatistics[index]
                         VStack(alignment: .leading, spacing: 4) {
                             HStack {
-                                Text("\\(index + 1). \\(item.title)")
+                                Text("\(index + 1). \(item.title)")
                                     .lineLimit(1)
                                 Spacer()
-                                Text("\\(item.playCount)回")
+                                Text("\(item.playCount)回")
                                     .monospacedDigit()
                             }
 
@@ -835,7 +836,7 @@ struct ContentView: View {
                             }
 
                             HStack(spacing: 14) {
-                                Label("完了 \\(item.completionCount)回", systemImage: "checkmark.circle")
+                                Label("完了 \(item.completionCount)回", systemImage: "checkmark.circle")
                                 Label(formattedListeningTime(item.listenedSeconds), systemImage: "clock")
                             }
                             .font(.caption2)
@@ -1613,7 +1614,7 @@ struct ContentView: View {
             musicTracks.map { ($0.path, $0) },
             uniquingKeysWith: { first, _ in first }
         )
-        let grouped = Dictionary(grouping: playbackHistories, by: \\.trackPath)
+        let grouped = Dictionary(grouping: playbackHistories, by: \.trackPath)
 
         return grouped.compactMap { path, histories in
             guard let track = tracksByPath[path], !histories.isEmpty else {
@@ -1626,7 +1627,7 @@ struct ContentView: View {
                 artist: track.artist,
                 playCount: histories.count,
                 listenedSeconds: histories.reduce(0) { $0 + $1.listenedSeconds },
-                completionCount: histories.filter(\\.completed).count
+                completionCount: histories.filter(\.completed).count
             )
         }
         .sorted {
