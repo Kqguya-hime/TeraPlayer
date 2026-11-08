@@ -13,8 +13,12 @@ final class OpenListService {
 
     private let baseURL = "http://192.168.0.10:5244"
 
-    // OpenListで新しく発行したトークンを設定する
-    private let token = ""
+    private func authorizationToken() throws -> String {
+        guard let token = try OpenListTokenStore.load(), !token.isEmpty else {
+            throw OpenListError.missingToken
+        }
+        return token
+    }
 
     // MARK: - エラー定義
 
@@ -23,6 +27,7 @@ final class OpenListService {
         case httpError(Int)
         case apiError(Int, String)
         case missingFileList
+        case missingToken
 
         var errorDescription: String? {
             switch self {
@@ -37,6 +42,9 @@ final class OpenListService {
 
             case .missingFileList:
                 return "ファイル一覧を取得できませんでした"
+
+            case .missingToken:
+                return "OpenListのAPIトークンが未設定です。管理画面で登録してください。"
             }
         }
     }
@@ -59,6 +67,7 @@ final class OpenListService {
 
     func getFiles(path: String) async throws -> [OpenListFile] {
 
+        let token = try authorizationToken()
         let url = URL(string: "\(baseURL)/api/fs/list")!
 
         var request = URLRequest(url: url)
@@ -113,6 +122,7 @@ final class OpenListService {
 
     func getMusicURL(path: String) async throws -> URL {
 
+        let token = try authorizationToken()
         let url = URL(string: "\(baseURL)/api/fs/get")!
 
         var request = URLRequest(url: url)
