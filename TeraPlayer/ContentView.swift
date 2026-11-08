@@ -932,7 +932,9 @@ struct ContentView: View {
                     .chartXAxisLabel("再生回数")
                     .frame(height: CGFloat(max(trackStatistics.count * 34, 180)))
 
-                    ForEach(Array(trackStatistics.enumerated()), id: \.element.id) { index, item in
+                    ForEach(trackStatistics.indices, id: \.self) { index in
+                        let item = trackStatistics[index]
+
                         VStack(alignment: .leading, spacing: 4) {
                             HStack {
                                 Text("\(index + 1). \(item.title)")
@@ -972,7 +974,9 @@ struct ContentView: View {
                     Text("アーティスト情報のある再生履歴がありません")
                         .foregroundStyle(.secondary)
                 } else {
-                    ForEach(Array(artistStatistics.enumerated()), id: \.element.id) { index, item in
+                    ForEach(artistStatistics.indices, id: \.self) { index in
+                        let item = artistStatistics[index]
+
                         HStack {
                             Text("\(index + 1).")
                                 .foregroundStyle(.secondary)
