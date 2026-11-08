@@ -406,6 +406,24 @@ struct ContentView: View {
     private var libraryScreen: some View {
         NavigationStack {
             List {
+                HStack {
+                    Button {
+                        Task { await goToParentFolder() }
+                    } label: {
+                        Label("上へ", systemImage: "arrow.up")
+                    }
+                    .disabled(isOfflineMode || currentPath == "/terabox" || selectedArtist != nil || selectedAlbum != nil)
+
+                    Spacer()
+
+                    Button {
+                        Task { await loadFiles() }
+                    } label: {
+                        Label("更新", systemImage: "arrow.clockwise")
+                    }
+                }
+                .buttonStyle(.bordered)
+
                 Picker("表示", selection: $libraryBrowseMode) {
                     Text("曲").tag("曲")
                     Text("アーティスト").tag("アーティスト")
@@ -535,19 +553,6 @@ struct ContentView: View {
                 }
             }
             .navigationTitle(selectedArtist ?? selectedAlbum ?? "楽曲")
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("上へ") {
-                        Task { await goToParentFolder() }
-                    }
-                    .disabled(isOfflineMode || currentPath == "/terabox" || selectedArtist != nil || selectedAlbum != nil)
-                }
-                ToolbarItemGroup(placement: .topBarTrailing) {
-                    Button("更新") {
-                        Task { await loadFiles() }
-                    }
-                }
-            }
         }
         .sheet(item: $queueTarget) { target in
             queueCreationSheet(for: target)
@@ -769,7 +774,24 @@ struct ContentView: View {
 
     private func playlistDetailScreen(_ playlist: MusicPlaylist) -> some View {
         List {
-            Section("曲一覧（\(playlist.trackPaths.count)曲）") {
+            Section {
+                HStack {
+                    EditButton()
+                    Spacer()
+                    Button {
+                        addingTracksToPlaylistID = playlist.id
+                        selectedTrackPathsToAdd = []
+                        isPlaylistTrackPickerPresented = true
+                    } label: {
+                        Label("曲を追加", systemImage: "plus")
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+
+                Text("曲一覧（\(playlist.trackPaths.count)曲）")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+
                 if playlist.trackPaths.isEmpty {
                     Text("曲が登録されていません")
                         .foregroundStyle(.secondary)
@@ -807,21 +829,6 @@ struct ContentView: View {
         }
         .navigationTitle(playlist.name)
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                EditButton()
-            }
-            ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    addingTracksToPlaylistID = playlist.id
-                    selectedTrackPathsToAdd = []
-                    isPlaylistTrackPickerPresented = true
-                } label: {
-                    Image(systemName: "plus")
-                }
-                .accessibilityLabel("曲を追加")
-            }
-        }
         .sheet(isPresented: $isPlaylistTrackPickerPresented) {
             playlistTrackPickerSheet
         }
@@ -1087,7 +1094,14 @@ struct ContentView: View {
                     }
                 }
 
-                Section("再生キュー（\(queue.count)曲）") {
+                Section {
+                    HStack {
+                        Text("再生キュー（\(queue.count)曲）")
+                            .font(.headline)
+                        Spacer()
+                        EditButton()
+                    }
+
                     if queue.isEmpty {
                         Text("キューは空です")
                             .foregroundStyle(.secondary)
@@ -1118,9 +1132,6 @@ struct ContentView: View {
                 }
             }
             .navigationTitle("再生")
-            .toolbar {
-                EditButton()
-            }
         }
     }
 
