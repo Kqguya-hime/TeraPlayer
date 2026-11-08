@@ -2831,11 +2831,9 @@ struct ContentView: View {
             return
         }
 
-        var selectedItem = queue.remove(at: index)
+        let selectedItem = queue.remove(at: index)
 
-        selectedItem.source = .manual
-
-        // キューから通常の曲を選んだ場合は自動補充条件を解除
+        // キューから曲を選んだ場合は自動補充条件を解除するが、再生元は保持する
         isPlaylistPlayback = false
         activeRefillCondition = nil
 
@@ -3379,10 +3377,8 @@ struct ContentView: View {
 
         // 現在の曲をキューの先頭に戻す
         if let track = currentTrack {
-            var item = track
-            item.source = .manual
-
-            queue.insert(item, at: 0)
+            // 元の再生元を保持し、プレイリスト／アーティスト／アルバム由来の曲を通常再生扱いにしない
+            queue.insert(track, at: 0)
         }
 
         Task {
