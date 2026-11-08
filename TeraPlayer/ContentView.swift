@@ -254,23 +254,27 @@ struct ContentView: View {
     @State private var queueShuffle = false
     @State private var queueOperation: QueueOperation = .replace
     @State private var activeRefillCondition: QueueRefillCondition? = nil
+    @State private var selectedTab = 0
 
     var body: some View {
-        TabView {
+        TabView(selection: $selectedTab) {
             libraryScreen
                 .tabItem {
                     Label("楽曲", systemImage: "music.note.list")
                 }
+                .tag(0)
 
             playbackScreen
                 .tabItem {
                     Label("再生", systemImage: "play.circle")
                 }
+                .tag(1)
 
             managementScreen
                 .tabItem {
                     Label("管理", systemImage: "slider.horizontal.3")
                 }
+                .tag(2)
         }
         .safeAreaInset(edge: .bottom) {
             playerControls
@@ -485,7 +489,7 @@ struct ContentView: View {
                     LabeledContent("対象曲数", value: "\(tracks.count) 曲")
                 }
 
-                Section("再生順") {
+                Section("シャッフル") {
                     Picker("シャッフル", selection: $queueShuffle) {
                         Text("OFF").tag(false)
                         Text("ON").tag(true)
@@ -535,25 +539,7 @@ struct ContentView: View {
     private var playbackScreen: some View {
         NavigationStack {
             List {
-                Section("現在再生中") {
-                    if let track = currentTrack {
-                        HStack {
-                            Image(systemName: "speaker.wave.2.fill")
-                                .foregroundStyle(.blue)
-                            VStack(alignment: .leading) {
-                                Text(track.file.name).lineLimit(1)
-                                Text(isPlaying ? "再生中" : "停止中")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                    } else {
-                        Text("再生していません")
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                Section("再生キュー") {
+                Section("再生キュー（\(queue.count)曲）") {
                     if queue.isEmpty {
                         Text("キューは空です")
                             .foregroundStyle(.secondary)
@@ -581,6 +567,24 @@ struct ContentView: View {
                     }
                     .onMove(perform: moveQueueItems)
                     .onDelete(perform: deleteQueueItems)
+                }
+
+                Section("現在再生中") {
+                    if let track = currentTrack {
+                        HStack {
+                            Image(systemName: "speaker.wave.2.fill")
+                                .foregroundStyle(.blue)
+                            VStack(alignment: .leading) {
+                                Text(track.file.name).lineLimit(1)
+                                Text(isPlaying ? "再生中" : "停止中")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    } else {
+                        Text("再生していません")
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
             .navigationTitle("再生")
@@ -2076,6 +2080,23 @@ struct ContentView: View {
                 }
 
                 Spacer()
+
+                // 再生キューを開く
+                Button {
+                    selectedTab = 1
+                } label: {
+                    Image(systemName: "list.bullet")
+                        .foregroundStyle(.primary)
+                        .overlay(alignment: .topTrailing) {
+                            if !queue.isEmpty {
+                                Circle()
+                                    .fill(.blue)
+                                    .frame(width: 7, height: 7)
+                                    .offset(x: 4, y: -4)
+                            }
+                        }
+                }
+                .accessibilityLabel("再生キュー")
 
                 // シャッフル
                 Button {
