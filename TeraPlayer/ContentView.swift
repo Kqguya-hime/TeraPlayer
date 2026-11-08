@@ -251,6 +251,7 @@ struct ContentView: View {
     @State private var selectedArtist: String? = nil
     @State private var selectedAlbum: String? = nil
     @State private var queueTarget: QueueTarget? = nil
+    @State private var isQueueTrackListExpanded = false
     @State private var queueShuffle = false
     @State private var queueOperation: QueueOperation = .replace
     @State private var activeRefillCondition: QueueRefillCondition? = nil
@@ -489,6 +490,41 @@ struct ContentView: View {
                     LabeledContent("対象曲数", value: "\(tracks.count) 曲")
                 }
 
+                Section {
+                    DisclosureGroup(
+                        "対象曲一覧（\(tracks.count)曲）",
+                        isExpanded: $isQueueTrackListExpanded
+                    ) {
+                        if tracks.isEmpty {
+                            Text("対象曲がありません")
+                                .foregroundStyle(.secondary)
+                        } else {
+                            ScrollView {
+                                LazyVStack(alignment: .leading, spacing: 10) {
+                                    ForEach(tracks, id: \.path) { track in
+                                        VStack(alignment: .leading, spacing: 3) {
+                                            Text(
+                                                track.title
+                                                    ?? (track.fileName as NSString).deletingPathExtension
+                                            )
+                                            .font(.body)
+
+                                            if let artist = track.artist, !artist.isEmpty {
+                                                Text(artist)
+                                                    .font(.caption)
+                                                    .foregroundStyle(.secondary)
+                                            }
+                                        }
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                    }
+                                }
+                                .padding(.vertical, 6)
+                            }
+                            .frame(maxHeight: 220)
+                        }
+                    }
+                }
+
                 Section("シャッフル") {
                     Picker("シャッフル", selection: $queueShuffle) {
                         Text("OFF").tag(false)
@@ -511,17 +547,22 @@ struct ContentView: View {
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
-
-                Section {
-                    Button {
-                        createQueue(for: target)
-                        queueTarget = nil
-                    } label: {
-                        Text("キューを作成")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .disabled(tracks.isEmpty)
+            }
+            .safeAreaInset(edge: .bottom) {
+                Button {
+                    createQueue(for: target)
+                    queueTarget = nil
+                } label: {
+                    Text("キューを作成")
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
                 }
+                .buttonStyle(.borderedProminent)
+                .disabled(tracks.isEmpty)
+                .padding(.horizontal)
+                .padding(.top, 8)
+                .padding(.bottom, 4)
+                .background(.bar)
             }
             .navigationTitle("キューを作成")
             .navigationBarTitleDisplayMode(.inline)
