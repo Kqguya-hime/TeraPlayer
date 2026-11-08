@@ -215,151 +215,136 @@ struct ContentView: View {
     // 自動選曲する曲数
     private let shuffleQueueCount = 10
 
-    var body: some View {
+    @State private var libraryBrowseMode = "曲"
+    @State private var selectedArtist: String? = nil
+    @State private var selectedAlbum: String? = nil
 
+    var body: some View {
+        TabView {
+            libraryScreen
+                .tabItem {
+                    Label("楽曲", systemImage: "music.note.list")
+                }
+
+            playbackScreen
+                .tabItem {
+                    Label("再生", systemImage: "play.circle")
+                }
+
+            managementScreen
+                .tabItem {
+                    Label("管理", systemImage: "slider.horizontal.3")
+                }
+        }
+        .safeAreaInset(edge: .bottom) {
+            playerControls
+        }
+        .task {
+            networkMonitor.start()
+            configureBackgroundDownloadCallbacks()
+            BackgroundDownloadManager.shared.restoreSession()
+            configureAudioSession()
+            configureNowPlaying()
+            await loadFiles()
+        }
+        .onReceive(
+            NotificationCenter.default.publisher(
+                for: .AVPlayerItemDidPlayToEndTime
+            )
+        ) { notification in
+            if let finishedItem = notification.object as? AVPlayerItem,
+               finishedItem == player.currentItem {
+                Task {
+                    await playNext(isNaturalEnd: true)
+                }
+            }
+        }
+        .onChange(of: networkMonitor.isWiFiConnected) { _, isConnected in
+            if isConnected {
+                print("Wi-Fi接続を検知：自動同期を開始")
+                Task {
+                    await loadFiles()
+                    await scanLibrary()
+                }
+                retryInterruptedDownloadsIfNeeded()
+            }
+        }
+        .onChange(of: backgroundDownloadNeedsRetry) { _, needsRetry in
+            if needsRetry {
+                retryInterruptedDownloadsIfNeeded()
+            }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active && networkMonitor.isWiFiConnected {
+                print("アプリ復帰：Wi-Fi接続中のため自動同期")
+                Task {
+                    await loadFiles()
+                    await scanLibrary()
+                }
+            }
+        }
+    }
+
+    // MARK: - 画面
+
+    private var libraryScreen: some View {
         NavigationStack {
             List {
-
-                // 現在再生中の曲
-                Section("現在再生中") {
-
-                    if let track = currentTrack {
-                        HStack {
-                            Image(systemName: "speaker.wave.2.fill")
-                                .foregroundStyle(.blue)
-
-                            VStack(alignment: .leading) {
-                                Text(track.file.name)
-                                    .lineLimit(1)
-
-                                Text(isPlaying ? "再生中" : "停止中")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                    } else {
-                        Text("再生していません")
-                            .foregroundStyle(.secondary)
-                    }
+                Picker("表示", selection: $libraryBrowseMode) {
+                    Text("曲").tag("曲")
+                    Text("アーティスト").tag("アーティスト")
+                    Text("アルバム").tag("アルバム")
                 }
-                
-                Section("音楽ライブラリ") {
+                .pickerStyle(.segmented)
 
-                    if isScanningLibrary {
-                        ProgressView(libraryScanStatus)
-                    } else if !libraryScanStatus.isEmpty {
-                        Text(libraryScanStatus)
-                            .foregroundStyle(.secondary)
-                    } else {
-                        Text("まだスキャンしていません")
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                
-                // オフラインダウンロード
-                Section("オフライン保存") {
-
-                    // 全曲ダウンロード
-                    Button {
-                        downloadTask = Task {
-                            await downloadAllTracks()
-                        }
-                    } label: {
-                        Label(
-                            "全曲ダウンロード",
-                            systemImage: "arrow.down.circle"
-                        )
-                    }
-                    .disabled(isDownloading || isScanningLibrary)
-
-                    // キャンセル
-                    Button(role: .destructive) {
-                        downloadTask?.cancel()
-
-                        BackgroundDownloadManager.shared.cancelAllDownloads()
-
-                        downloadProgress = "キャンセル処理中..."
-                    } label: {
-                        Label("キャンセル", systemImage: "xmark.circle")
-                    }
-                    .disabled(!isDownloading)
-
-                    // 進捗表示
-                    if !downloadProgress.isEmpty {
-                        Text(downloadProgress)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    // ダウンロード中のインジケーター
-                    if isDownloading {
-                        ProgressView()
-                    }
-
-                    // 失敗した曲の一覧
-                    if !downloadFailures.isEmpty {
-
-                        Text("ダウンロード失敗：\(downloadFailures.count)曲")
-                            .font(.subheadline)
-                            .foregroundStyle(.red)
-
-                        ForEach(
-                            Array(downloadFailures.enumerated()),
-                            id: \.offset
-                        ) { _, fileName in
-
-                            Label(
-                                fileName,
-                                systemImage: "exclamationmark.circle"
-                            )
-                            .font(.caption)
-                            .foregroundStyle(.red)
-                        }
-                    }
-                }
-                // 次に再生する曲
-                Section("再生キュー") {
-
-                    if queue.isEmpty {
-                        Text("キューは空です")
-                            .foregroundStyle(.secondary)
-                    }
-
-                    ForEach(queue) { item in
-
+                if libraryBrowseMode == "アーティスト" {
+                    ForEach(artistNames, id: \.self) { artist in
                         Button {
-                            moveToFront(item)
+                            selectedArtist = artist
+                            selectedAlbum = nil
+                            libraryBrowseMode = "曲"
+                            searchText = ""
                         } label: {
+                            Label(artist, systemImage: "person")
+                        }
+                    }
+                } else if libraryBrowseMode == "アルバム" {
+                    ForEach(albumNames, id: \.self) { album in
+                        Button {
+                            selectedAlbum = album
+                            selectedArtist = nil
+                            libraryBrowseMode = "曲"
+                            searchText = ""
+                        } label: {
+                            Label(album, systemImage: "square.stack")
+                        }
+                    }
+                } else {
+                    if let artist = selectedArtist {
+                        Section {
                             HStack {
-                                Image(systemName: "music.note")
-
-                                VStack(alignment: .leading) {
-                                    Text(item.file.name)
-                                        .foregroundStyle(.primary)
-                                        .lineLimit(1)
-
-                                    Text(
-                                        item.source == .manual
-                                        ? "ユーザー指定"
-                                        : "自動選曲"
-                                    )
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                }
-
+                                Text("アーティスト：\(artist)")
                                 Spacer()
-
-                                Image(systemName: "line.3.horizontal")
-                                    .foregroundStyle(.secondary)
+                                Button("解除") {
+                                    selectedArtist = nil
+                                }
+                                .font(.caption)
                             }
                         }
                     }
-                    .onMove(perform: moveQueueItems)
-                    .onDelete(perform: deleteQueueItems)
-                }
 
-                // 現在開いているフォルダ
-                Section("フォルダ: \(folderName)") {
+                    if let album = selectedAlbum {
+                        Section {
+                            HStack {
+                                Text("アルバム：\(album)")
+                                Spacer()
+                                Button("解除") {
+                                    selectedAlbum = nil
+                                }
+                                .font(.caption)
+                            }
+                        }
+                    }
 
                     Picker("検索対象", selection: $searchField) {
                         ForEach(MusicSearchField.allCases) { field in
@@ -376,53 +361,36 @@ struct ContentView: View {
                         ProgressView("読み込み中...")
                     }
 
-                    if !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                        && displayedFiles.isEmpty {
-                        Text("該当する曲はありません")
+                    if libraryDisplayFiles.isEmpty {
+                        Text("表示できる楽曲がありません")
                             .foregroundStyle(.secondary)
                     }
 
-                    ForEach(displayedFiles) { file in
-
-                        let isMusic = isMusicFile(file)
-
+                    ForEach(libraryDisplayFiles) { file in
                         Button {
-
                             if file.is_dir {
-                                Task {
-                                    await openFolder(file)
-                                }
-                            } else if isMusic {
+                                Task { await openFolder(file) }
+                            } else if isMusicFile(file) {
                                 enqueueOrPlay(file)
                             }
-
                         } label: {
-
                             HStack {
-                                Image(systemName: file.is_dir
-                                      ? "folder.fill"
-                                      : "music.note")
-
+                                Image(systemName: file.is_dir ? "folder.fill" : "music.note")
                                 VStack(alignment: .leading) {
                                     Text(file.name)
                                         .foregroundStyle(.primary)
-
-                                    Text(file.is_dir
-                                         ? "フォルダ"
-                                         : "\(file.size) bytes")
+                                    Text(file.is_dir ? "フォルダ" : "\(file.size) bytes")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                 }
-
                                 Spacer()
-
-                                if isMusic {
+                                if isMusicFile(file) {
                                     Image(systemName: "text.badge.plus")
                                         .foregroundStyle(.blue)
                                 }
                             }
                         }
-                        .disabled(!file.is_dir && !isMusic)
+                        .disabled(!file.is_dir && !isMusicFile(file))
                     }
                 }
 
@@ -433,121 +401,215 @@ struct ContentView: View {
                     }
                 }
             }
-
-            .navigationTitle("TeraPlayer")
-
+            .navigationTitle(selectedArtist ?? selectedAlbum ?? "楽曲")
             .toolbar {
-
                 ToolbarItem(placement: .topBarLeading) {
                     Button("上へ") {
-                        Task {
-                            await goToParentFolder()
-                        }
+                        Task { await goToParentFolder() }
                     }
-                    .disabled(isOfflineMode || currentPath == "/terabox")
+                    .disabled(isOfflineMode || currentPath == "/terabox" || selectedArtist != nil || selectedAlbum != nil)
                 }
-
                 ToolbarItemGroup(placement: .topBarTrailing) {
-
-                    EditButton()
-
                     Button("更新") {
-                        Task {
-                            await loadFiles()
-                        }
-                    }
-
-                    Button("全曲スキャン") {
-                        Task {
-                            await scanLibrary()
-                        }
-                    }
-                    .disabled(isScanningLibrary)
-                }
-            }
-
-            .safeAreaInset(edge: .bottom) {
-                playerControls
-            }
-
-            .task {
-                networkMonitor.start()
-
-                // バックグラウンドダウンロードの通知を設定
-                configureBackgroundDownloadCallbacks()
-
-                // 前回のダウンロード状態を復元
-                BackgroundDownloadManager.shared.restoreSession()
-
-                configureAudioSession()
-                configureNowPlaying()
-                await loadFiles()
-            }
-
-            // 曲の再生終了を検知
-            .onReceive(
-                NotificationCenter.default.publisher(
-                    for: .AVPlayerItemDidPlayToEndTime
-                )
-            ) { notification in
-
-                if let finishedItem = notification.object as? AVPlayerItem,
-                   finishedItem == player.currentItem {
-
-                    Task {
-                        await playNext(isNaturalEnd: true)
+                        Task { await loadFiles() }
                     }
                 }
             }
-            
-            // Wi-Fi接続状態が変化したとき
-            .onChange(of: networkMonitor.isWiFiConnected) {
-                _, isConnected in
-
-                if isConnected {
-
-                    print("Wi-Fi接続を検知：自動同期を開始")
-
-                    Task {
-                        await loadFiles()
-                        await scanLibrary()
-                    }
-                }
-            }
-            
-            .onChange(of: backgroundDownloadNeedsRetry) { _, needsRetry in
-
-                if needsRetry {
-                    retryInterruptedDownloadsIfNeeded()
-                }
-            }
-            .onChange(of: networkMonitor.isWiFiConnected) { _, isConnected in
-
-                if isConnected {
-                    retryInterruptedDownloadsIfNeeded()
-                }
-            }
-
-            // アプリがバックグラウンドから復帰したとき
-            .onChange(of: scenePhase) {
-                _, phase in
-
-                if phase == .active &&
-                   networkMonitor.isWiFiConnected {
-
-                    print("アプリ復帰：Wi-Fi接続中のため自動同期")
-
-                    Task {
-                        await loadFiles()
-                        await scanLibrary()
-                    }
-                }
-            }
-            
-            
         }
     }
-    
+
+    private var playbackScreen: some View {
+        NavigationStack {
+            List {
+                Section("現在再生中") {
+                    if let track = currentTrack {
+                        HStack {
+                            Image(systemName: "speaker.wave.2.fill")
+                                .foregroundStyle(.blue)
+                            VStack(alignment: .leading) {
+                                Text(track.file.name).lineLimit(1)
+                                Text(isPlaying ? "再生中" : "停止中")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    } else {
+                        Text("再生していません")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Section("再生キュー") {
+                    if queue.isEmpty {
+                        Text("キューは空です")
+                            .foregroundStyle(.secondary)
+                    }
+
+                    ForEach(queue) { item in
+                        Button {
+                            moveToFront(item)
+                        } label: {
+                            HStack {
+                                Image(systemName: "music.note")
+                                VStack(alignment: .leading) {
+                                    Text(item.file.name)
+                                        .foregroundStyle(.primary)
+                                        .lineLimit(1)
+                                    Text(item.source == .manual ? "ユーザー指定" : "自動選曲")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Image(systemName: "line.3.horizontal")
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    .onMove(perform: moveQueueItems)
+                    .onDelete(perform: deleteQueueItems)
+                }
+            }
+            .navigationTitle("再生")
+            .toolbar {
+                EditButton()
+            }
+        }
+    }
+
+    private var managementScreen: some View {
+        NavigationStack {
+            List {
+                Section("音楽ライブラリ") {
+                    if isScanningLibrary {
+                        ProgressView(libraryScanStatus)
+                    } else if !libraryScanStatus.isEmpty {
+                        Text(libraryScanStatus)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text("まだスキャンしていません")
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Button {
+                        Task { await scanLibrary() }
+                    } label: {
+                        Label("全曲スキャン・同期", systemImage: "arrow.triangle.2.circlepath")
+                    }
+                    .disabled(isScanningLibrary || isOfflineMode)
+                }
+
+                Section("オフライン保存") {
+                    Button {
+                        downloadTask = Task { await downloadAllTracks() }
+                    } label: {
+                        Label("全曲ダウンロード", systemImage: "arrow.down.circle")
+                    }
+                    .disabled(isDownloading || isScanningLibrary || isOfflineMode)
+
+                    Button(role: .destructive) {
+                        downloadTask?.cancel()
+                        BackgroundDownloadManager.shared.cancelAllDownloads()
+                        downloadProgress = "キャンセル処理中..."
+                    } label: {
+                        Label("キャンセル", systemImage: "xmark.circle")
+                    }
+                    .disabled(!isDownloading)
+
+                    if !downloadProgress.isEmpty {
+                        Text(downloadProgress)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    if isDownloading {
+                        ProgressView()
+                    }
+
+                    if !downloadFailures.isEmpty {
+                        Text("ダウンロード失敗：\(downloadFailures.count)曲")
+                            .font(.subheadline)
+                            .foregroundStyle(.red)
+
+                        ForEach(Array(downloadFailures.enumerated()), id: \.offset) { _, fileName in
+                            Label(fileName, systemImage: "exclamationmark.circle")
+                                .font(.caption)
+                                .foregroundStyle(.red)
+                        }
+                    }
+                }
+
+                Section("接続状態") {
+                    LabeledContent("ライブラリ", value: isOfflineMode ? "オフライン" : "オンライン")
+                    LabeledContent("Wi-Fi", value: networkMonitor.isWiFiConnected ? "接続中" : "未接続")
+                    Button("ライブラリを再読み込み") {
+                        Task { await loadFiles() }
+                    }
+                }
+
+                if !errorMessage.isEmpty {
+                    Section("エラー") {
+                        Text(errorMessage).foregroundStyle(.red)
+                    }
+                }
+            }
+            .navigationTitle("管理")
+        }
+    }
+
+    // MARK: - ライブラリ表示データ
+
+    private var artistNames: [String] {
+        Array(Set(musicTracks.compactMap { track in
+            track.artist?.trimmingCharacters(in: .whitespacesAndNewlines)
+        }.filter { !$0.isEmpty })).sorted()
+    }
+
+    private var albumNames: [String] {
+        Array(Set(musicTracks.compactMap { track in
+            track.album?.trimmingCharacters(in: .whitespacesAndNewlines)
+        }.filter { !$0.isEmpty })).sorted()
+    }
+
+    private var libraryDisplayFiles: [OpenListFile] {
+        if let artist = selectedArtist {
+            return musicTracks
+                .filter { $0.artist == artist }
+                .sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+                .map { track in
+                    OpenListFile(name: track.fileName, size: track.fileSize, is_dir: false, modified: track.cloudModified, created: nil, sign: track.cloudSign, path: track.path)
+                }
+                .filter { fileMatchesSearch($0) }
+        }
+
+        if let album = selectedAlbum {
+            return musicTracks
+                .filter { $0.album == album }
+                .sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+                .map { track in
+                    OpenListFile(name: track.fileName, size: track.fileSize, is_dir: false, modified: track.cloudModified, created: nil, sign: track.cloudSign, path: track.path)
+                }
+                .filter { fileMatchesSearch($0) }
+        }
+
+        return displayedFiles
+    }
+
+    private func fileMatchesSearch(_ file: OpenListFile) -> Bool {
+        let keyword = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !keyword.isEmpty else { return true }
+        guard let track = musicTracks.first(where: { $0.path == makePath(for: file) }) else {
+            return false
+        }
+        switch searchField {
+        case .title:
+            return track.title.localizedCaseInsensitiveContains(keyword)
+        case .artist:
+            return track.artist?.localizedCaseInsensitiveContains(keyword) ?? false
+        case .album:
+            return track.album?.localizedCaseInsensitiveContains(keyword) ?? false
+        }
+    }
+
     // MARK: - 検索結果
 
     private var displayedFiles: [OpenListFile] {
