@@ -1547,7 +1547,7 @@ struct ContentView: View {
 
         await loadFiles()
 
-        if isShuffle && queue.isEmpty {
+        if activeRefillCondition == nil && isShuffle && queue.isEmpty {
             fillShuffleQueue()
         }
     }
@@ -1739,6 +1739,9 @@ struct ContentView: View {
 
         selectedItem.source = .manual
 
+        // キューから通常の曲を選んだ場合は自動補充条件を解除
+        activeRefillCondition = nil
+
         queue.insert(selectedItem, at: 0)
 
         // 再生中の曲がない場合
@@ -1749,7 +1752,7 @@ struct ContentView: View {
             Task {
                 let success = await startTrack(firstItem)
 
-                if success && isShuffle {
+                if success && activeRefillCondition == nil && isShuffle {
                     fillShuffleQueue()
                 }
             }
