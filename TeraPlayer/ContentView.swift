@@ -240,6 +240,8 @@ struct ContentView: View {
     @State private var isPlaylistTrackPickerPresented = false
     @State private var addingTracksToPlaylistID: String? = nil
     @State private var selectedTrackPathsToAdd: [String] = []
+    @State private var playlistTrackSearchField: MusicSearchField = .title
+    @State private var playlistTrackSearchText = ""
 
     // ライブラリスキャンの状態
     @State private var isScanningLibrary = false
@@ -407,15 +409,7 @@ struct ContentView: View {
         NavigationStack {
             List {
                 HStack {
-                    Button {
-                        Task { await goToParentFolder() }
-                    } label: {
-                        Label("上へ", systemImage: "arrow.up")
-                    }
-                    .disabled(isOfflineMode || currentPath == "/terabox" || selectedArtist != nil || selectedAlbum != nil)
-
                     Spacer()
-
                     Button {
                         Task { await loadFiles() }
                     } label: {
@@ -781,11 +775,14 @@ struct ContentView: View {
                     Button {
                         addingTracksToPlaylistID = playlist.id
                         selectedTrackPathsToAdd = []
+                        playlistTrackSearchField = .title
+                        playlistTrackSearchText = ""
                         isPlaylistTrackPickerPresented = true
                     } label: {
                         Label("曲を追加", systemImage: "plus")
                     }
                     .buttonStyle(.borderedProminent)
+                    .tint(.blue)
                 }
 
                 Text("曲一覧（\(playlist.trackPaths.count)曲）")
@@ -837,13 +834,51 @@ struct ContentView: View {
     private var playlistTrackPickerSheet: some View {
         NavigationStack {
             List {
+                Section {
+                    Picker("検索対象", selection: $playlistTrackSearchField) {
+                        ForEach(MusicSearchField.allCases) { field in
+                            Text(field.rawValue).tag(field)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+
+                    HStack(spacing: 10) {
+                        Image(systemName: "magnifyingglass")
+                            .foregroundStyle(.secondary)
+                        TextField(playlistTrackSearchField.rawValue + "で検索", text: $playlistTrackSearchText)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                        if !playlistTrackSearchText.isEmpty {
+                            Button {
+                                playlistTrackSearchText = ""
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .foregroundStyle(.secondary)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+
                 if let playlist = playlists.first(where: {
                     $0.id == addingTracksToPlaylistID
                 }) {
                     ForEach(
-                        musicTracks.sorted {
-                            $0.title.localizedStandardCompare($1.title) == .orderedAscending
-                        },
+                        musicTracks
+                            .filter { track in
+                                let keyword = playlistTrackSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
+                                guard !keyword.isEmpty else { return true }
+                                let target: String?
+                                switch playlistTrackSearchField {
+                                case .title: target = track.title
+                                case .artist: target = track.artist
+                                case .album: target = track.album
+                                }
+                                return target?.localizedCaseInsensitiveContains(keyword) ?? false
+                            }
+                            .sorted {
+                                $0.title.localizedStandardCompare($1.title) == .orderedAscending
+                            },
                         id: \.path
                     ) { track in
                         let alreadyAdded = playlist.trackPaths.contains(track.path)
