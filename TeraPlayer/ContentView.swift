@@ -181,6 +181,9 @@ private struct ArtistStatistic: Identifiable {
 enum QueueSource: Equatable {
     case manual
     case automatic
+    case artistAlbum
+    case shuffle
+    case unplayedShuffle
     case playlist
 }
 
@@ -290,6 +293,8 @@ struct ContentView: View {
     @State private var unsavedHistorySeconds: Double = 0
     // 再生設定
     @State private var isShuffle = false
+    @State private var isUnplayedShuffle = false
+    @State private var normalShuffleNeedsReset = false
     @State private var repeatMode: RepeatMode = .off
     
     // オフラインダウンロードの状態
@@ -316,6 +321,12 @@ struct ContentView: View {
 
     // 自動選曲する曲数
     private let shuffleQueueCount = 10
+
+    private enum ShuffleMode {
+        case off
+        case normal
+        case unplayed
+    }
 
     @State private var libraryBrowseMode = "曲"
     @State private var selectedArtist: String? = nil
@@ -1300,18 +1311,20 @@ struct ContentView: View {
                                     Image(systemName: "forward.end.fill")
                                         .font(.title2)
                                 }
-                                .disabled(queue.isEmpty && !isShuffle && activeRefillCondition == nil)
+                                .disabled(queue.isEmpty && !isShuffle && !isUnplayedShuffle && activeRefillCondition == nil)
                                 .accessibilityLabel("次の曲")
                             }
                             .buttonStyle(.plain)
                             .frame(maxWidth: .infinity)
 
                             HStack {
-                                Button {
-                                    toggleShuffle()
+                                Menu {
+                                    Button("OFF") { setShuffleMode(.off) }
+                                    Button("通常シャッフル") { setShuffleMode(.normal) }
+                                    Button("未再生シャッフル") { setShuffleMode(.unplayed) }
                                 } label: {
-                                    Label("シャッフル", systemImage: "shuffle")
-                                        .foregroundStyle(isShuffle ? .blue : .secondary)
+                                    Label(shuffleModeTitle, systemImage: "shuffle")
+                                        .foregroundStyle(isShuffle || isUnplayedShuffle ? .blue : .secondary)
                                 }
 
                                 Spacer()
@@ -2603,8 +2616,8 @@ struct ContentView: View {
         await loadFiles()
 
         // シャッフル中かつキューが空なら新しいフォルダから補充
-        if activeRefillCondition == nil && isShuffle && queue.isEmpty {
-            fillShuffleQueue()
+        if activeRefillCondition == nil && queue.isEmpty {
+            fillActiveShuffleQueue()
         }
     }
 
@@ -2628,8 +2641,8 @@ struct ContentView: View {
 
         await loadFiles()
 
-        if activeRefillCondition == nil && isShuffle && queue.isEmpty {
-            fillShuffleQueue()
+        if activeRefillCondition == nil && queue.isEmpty {
+            fillActiveShuffleQueue()
         }
     }
 
@@ -2694,7 +2707,7 @@ struct ContentView: View {
                     path: track.path
                 ),
                 path: track.path,
-                source: .manual
+                source: .artistAlbum
             )
         }
 
@@ -2802,8 +2815,8 @@ struct ContentView: View {
             Task {
                 let success = await startTrack(firstItem)
 
-                if success && activeRefillCondition == nil && isShuffle {
-                    fillShuffleQueue()
+                if success && activeRefillCondition == nil {
+                    fillActiveShuffleQueue()
                 }
             }
         }
@@ -2836,8 +2849,8 @@ struct ContentView: View {
             Task {
                 let success = await startTrack(firstItem)
 
-                if success && activeRefillCondition == nil && isShuffle {
-                    fillShuffleQueue()
+                if success && activeRefillCondition == nil {
+                    fillActiveShuffleQueue()
                 }
             }
         }
@@ -2901,7 +2914,7 @@ struct ContentView: View {
                 QueueItem(
                     file: file,
                     path: makePath(for: file),
-                    source: .automatic
+                    source: .shuffle
                 )
             }
             .filter { item in
@@ -2923,15 +2936,126 @@ struct ContentView: View {
         queue.append(contentsOf: selectedItems)
     }
 
-    // シャッフル切り替え
-    private func toggleShuffle() {
+    // 選択中のシャッフル方式
+    private var shuffleModeTitle: String {
+        if isUnplayedShuffle { return "未再生シャッフル" }
+        if isShuffle { return "通常シャッフル" }
+        return "シャッフル OFF"
+    }
 
-        isShuffle.toggle()
+    // シャッフル方式を切り替える
+    private func setShuffleMode(_ mode: ShuffleMode) {
+        let wasNormalShuffle = isShuffle
+        let wasUnplayedShuffle = isUnplayedShuffle
 
-        // ONにした場合だけ自動補充
-        if isShuffle && activeRefillCondition == nil {
-            fillShuffleQueue()
+        switch mode {
+        case .off:
+            isShuffle = false
+            isUnplayedShuffle = false
+            normalShuffleNeedsReset = false
+
+        case .normal:
+            isShuffle = true
+            isUnplayedShuffle = false
+            if !wasNormalShuffle {
+                normalShuffleNeedsReset = true
+            }
+
+        case .unplayed:
+            isShuffle = false
+            isUnplayedShuffle = true
+            normalShuffleNeedsReset = false
         }
+
+        // 別方式の自動選曲だけを取り除き、手動キューやプレイリスト曲は維持する
+        if mode != .off && (wasNormalShuffle != isShuffle || wasUnplayedShuffle != isUnplayedShuffle) {
+            queue.removeAll { $0.source == .shuffle || $0.source == .unplayedShuffle }
+        }
+
+        if activeRefillCondition == nil && !isPlaylistPlayback {
+            fillActiveShuffleQueue()
+        }
+    }
+
+    // 現在有効なシャッフル方式に応じてキューを補充する
+    private func fillActiveShuffleQueue() {
+        guard activeRefillCondition == nil, !isPlaylistPlayback else { return }
+
+        if isShuffle {
+            fillShuffleQueue()
+        } else if isUnplayedShuffle {
+            fillUnplayedShuffleQueue()
+        }
+    }
+
+    // 未再生フラグを全曲リセットする
+    private func resetUnplayedShuffleFlags() {
+        for track in musicTracks {
+            track.hasBeenPlayedInUnplayedShuffle = false
+        }
+
+        do {
+            try modelContext.save()
+        } catch {
+            print("未再生フラグの初期化に失敗: \\(error.localizedDescription)")
+        }
+    }
+
+    // ライブラリ全体から未再生曲をランダムにキューへ追加する
+    private func fillUnplayedShuffleQueue() {
+        guard isUnplayedShuffle else { return }
+
+        let queuedUnplayedCount = queue.filter {
+            $0.source == .unplayedShuffle
+        }.count
+        let neededCount = shuffleQueueCount - queuedUnplayedCount
+        guard neededCount > 0 else { return }
+
+        var unplayedTracks = musicTracks.filter {
+            $0.hasBeenPlayedInUnplayedShuffle != true
+        }
+
+        // 全曲が再生済みなら新しいサイクルを開始する
+        if unplayedTracks.isEmpty && !musicTracks.isEmpty {
+            resetUnplayedShuffleFlags()
+
+            // サイクル開始時点ですでに再生中の曲は、新サイクルでも再生済みにする
+            if let currentPath = currentTrack?.path,
+               let current = musicTracks.first(where: { $0.path == currentPath }) {
+                current.hasBeenPlayedInUnplayedShuffle = true
+                try? modelContext.save()
+            }
+
+            unplayedTracks = musicTracks.filter {
+                $0.hasBeenPlayedInUnplayedShuffle != true
+            }
+        }
+
+        let excludedPaths = Set(queue.map(\\.path)).union(
+            currentTrack.map { [$0.path] } ?? []
+        )
+        let candidates = unplayedTracks.filter {
+            !excludedPaths.contains($0.path)
+        }
+
+        let selectedTracks = Array(candidates.shuffled().prefix(neededCount))
+        let items = selectedTracks.map { track in
+            QueueItem(
+                file: OpenListFile(
+                    name: track.fileName,
+                    size: track.fileSize,
+                    is_dir: false,
+                    modified: track.cloudModified,
+                    created: nil,
+                    sign: track.cloudSign,
+                    path: track.path
+                ),
+                path: track.path,
+                source: .unplayedShuffle
+            )
+        }
+
+        queue.append(contentsOf: items)
     }
 
     // MARK: - 曲の再生
@@ -3035,6 +3159,8 @@ struct ContentView: View {
             player.play()
             isPlaying = true
 
+            updateUnplayedShuffleFlag(for: item)
+
             // 新しい再生セッションを開始して統計に記録
             beginPlaybackSession(trackPath: item.path)
             lastObservedPlaybackTime = nil
@@ -3049,6 +3175,31 @@ struct ContentView: View {
             isPlaying = false
 
             return false
+        }
+    }
+
+    // 実際に再生を開始した曲だけ未再生フラグを更新する
+    private func updateUnplayedShuffleFlag(for item: QueueItem) {
+        let shouldMarkAsPlayed = item.source == .manual
+            || item.source == .shuffle
+            || item.source == .unplayedShuffle
+        guard shouldMarkAsPlayed else { return }
+
+        // 通常シャッフルは、その方式で最初の曲が再生開始した時点で全フラグを初期化する
+        if isShuffle && normalShuffleNeedsReset && activeRefillCondition == nil && !isPlaylistPlayback {
+            resetUnplayedShuffleFlags()
+            normalShuffleNeedsReset = false
+        }
+
+        guard let track = musicTracks.first(where: { $0.path == item.path }) else {
+            return
+        }
+
+        track.hasBeenPlayedInUnplayedShuffle = true
+        do {
+            try modelContext.save()
+        } catch {
+            print("未再生フラグの保存に失敗: \\(error.localizedDescription)")
         }
     }
 
@@ -3183,9 +3334,7 @@ struct ContentView: View {
            let track = currentTrack,
            !queue.contains(where: { $0.path == track.path }) {
 
-            var repeatedTrack = track
-            repeatedTrack.source = .automatic
-
+            let repeatedTrack = track
             queue.append(repeatedTrack)
         }
 
@@ -3193,8 +3342,8 @@ struct ContentView: View {
         if queue.isEmpty && !isPlaylistPlayback {
             if activeRefillCondition != nil {
                 refillActiveConditionQueue()
-            } else if isShuffle {
-                fillShuffleQueue()
+            } else {
+                fillActiveShuffleQueue()
             }
         }
 
@@ -3216,8 +3365,8 @@ struct ContentView: View {
         }
 
         // 通常シャッフルのみ、従来どおり次の曲の再生開始後に補充
-        if activeRefillCondition == nil && isShuffle && queue.isEmpty && !isPlaylistPlayback {
-            fillShuffleQueue()
+        if activeRefillCondition == nil && queue.isEmpty && !isPlaylistPlayback {
+            fillActiveShuffleQueue()
         }
     }
 
@@ -3306,15 +3455,14 @@ struct ContentView: View {
                 }
                 .accessibilityLabel("再生キュー")
 
-                // シャッフル
-                Button {
-                    toggleShuffle()
+                // シャッフル方式
+                Menu {
+                    Button("OFF") { setShuffleMode(.off) }
+                    Button("通常シャッフル") { setShuffleMode(.normal) }
+                    Button("未再生シャッフル") { setShuffleMode(.unplayed) }
                 } label: {
-
                     Image(systemName: "shuffle")
-                        .foregroundStyle(
-                            isShuffle ? .blue : .secondary
-                        )
+                        .foregroundStyle(isShuffle || isUnplayedShuffle ? .blue : .secondary)
                 }
 
                 // 前の曲
@@ -3347,7 +3495,7 @@ struct ContentView: View {
 
                     Image(systemName: "forward.end.fill")
                 }
-                .disabled(queue.isEmpty && !isShuffle)
+                .disabled(queue.isEmpty && !isShuffle && !isUnplayedShuffle)
 
                 // リピート
                 Button {
