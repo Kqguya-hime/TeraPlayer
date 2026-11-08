@@ -774,7 +774,7 @@ struct ContentView: View {
                         .foregroundStyle(.secondary)
                 }
 
-                ForEach(playlist.trackPaths.indices, id: \\.self) { index in
+                ForEach(playlist.trackPaths.indices, id: \.self) { index in
                     let path = playlist.trackPaths[index]
                     if let track = musicTracks.first(where: { $0.path == path }) {
                         VStack(alignment: .leading, spacing: 3) {
