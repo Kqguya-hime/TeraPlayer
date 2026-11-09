@@ -442,15 +442,25 @@ struct ContentView: View {
     private var libraryScreen: some View {
         NavigationStack {
             List {
-                HStack {
-                    Spacer()
+                HStack(spacing: 10) {
+                    if currentPath != "/terabox" && !isOfflineMode {
+                        Button {
+                            Task { await goToParentFolder() }
+                        } label: {
+                            Label("上へ", systemImage: "arrow.up")
+                        }
+                        .buttonStyle(.bordered)
+                    }
+
+                    Spacer(minLength: 8)
+
                     Button {
                         Task { await loadFiles() }
                     } label: {
                         Label("更新", systemImage: "arrow.clockwise")
                     }
+                    .buttonStyle(.bordered)
                 }
-                .buttonStyle(.bordered)
 
                 Picker("表示", selection: $libraryBrowseMode) {
                     Text("曲").tag("曲")
