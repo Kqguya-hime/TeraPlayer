@@ -342,6 +342,7 @@ struct ContentView: View {
     @State private var queueOperation: QueueOperation = .replace
     @State private var activeRefillCondition: QueueRefillCondition? = nil
     @State private var selectedTab = 0
+    @AppStorage("appearanceTheme") private var appearanceTheme = "current"
 
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -359,6 +360,7 @@ struct ContentView: View {
         }
         .tabViewStyle(.automatic)
         .toolbar(.hidden, for: .tabBar)
+        .preferredColorScheme(appearanceTheme == "light" ? .light : nil)
         .safeAreaInset(edge: .top, spacing: 0) {
             Picker("画面", selection: $selectedTab) {
                 Text("楽曲").tag(0)
@@ -1409,6 +1411,20 @@ struct ContentView: View {
     private var managementScreen: some View {
         NavigationStack {
             List {
+                Section("外観設定") {
+                    Picker("デザイン", selection: $appearanceTheme) {
+                        Text("現在のデザイン").tag("current")
+                        Text("ライトテーマ").tag("light")
+                    }
+                    .pickerStyle(.segmented)
+
+                    Text(appearanceTheme == "light"
+                         ? "白を基調とした明るい配色を使用します。"
+                         : "現在の表示設定を維持します。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
                 Section("OpenList接続") {
                     LabeledContent(
                         "APIトークン",
