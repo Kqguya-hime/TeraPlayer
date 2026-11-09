@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		A10000000000000000000001 /* TagLibSwift in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000002 /* TagLibSwift */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXFileReference section */
 		99F579BE309B4A3900D6256F /* TeraPlayer.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TeraPlayer.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -36,6 +40,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A10000000000000000000001 /* TagLibSwift in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -78,6 +83,7 @@
 			);
 			name = TeraPlayer;
 			packageProductDependencies = (
+				A10000000000000000000002 /* TagLibSwift */,
 			);
 			productName = TeraPlayer;
 			productReference = 99F579BE309B4A3900D6256F /* TeraPlayer.app */;
@@ -107,6 +113,9 @@
 			);
 			mainGroup = 99F579B5309B4A3900D6256F;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				A10000000000000000000003 /* XCRemoteSwiftPackageReference "TagLibSwift" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 99F579BF309B4A3900D6256F /* Products */;
 			projectDirPath = "";
@@ -288,6 +297,7 @@
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
+				SWIFT_OBJC_INTEROP_MODE = objcxx;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Debug;
@@ -326,6 +336,25 @@
 			name = Release;
 		};
 /* End XCBuildConfiguration section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		A10000000000000000000003 /* XCRemoteSwiftPackageReference "TagLibSwift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/jeonghi/TagLibSwift.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.1.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		A10000000000000000000002 /* TagLibSwift */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A10000000000000000000003 /* XCRemoteSwiftPackageReference "TagLibSwift" */;
+			productName = TagLibSwift;
+		};
+/* End XCSwiftPackageProductDependency section */
 
 /* Begin XCConfigurationList section */
 		99F579B9309B4A3900D6256F /* Build configuration list for PBXProject "TeraPlayer" */ = {
