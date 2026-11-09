@@ -8,7 +8,6 @@ final class OpenListUploadService {
         case tokenMissing
         case invalidResponse
         case serverError(Int, String)
-        case destinationUnavailable
         case duplicateFile(String)
 
         var errorDescription: String? {
@@ -19,8 +18,6 @@ final class OpenListUploadService {
                 return "OpenListから有効な応答を受け取れませんでした。"
             case .serverError(let code, let message):
                 return "アップロードエラー (\(code)): \(message)"
-            case .destinationUnavailable:
-                return "アップロード先フォルダを準備できませんでした。"
             case .duplicateFile(let name):
                 return "同名ファイルがアップロード先に存在します：\(name)"
             }
@@ -66,7 +63,6 @@ final class OpenListUploadService {
         }
 
         guard (200...299).contains(httpResponse.statusCode) else {
-            // 別の処理が同時に作成した可能性を考慮して、作成後の状態を再確認する。
             let refreshedFiles = try await openListService.getFiles(path: parentPath)
             if refreshedFiles.contains(where: { $0.is_dir && $0.name == folderName }) {
                 return
@@ -87,6 +83,7 @@ final class OpenListUploadService {
         }
     }
 
+    // 新規アップロード。既存ファイルは上書きしない。
     func upload(fileURL: URL) async throws {
         try await ensureUploadDirectory()
 
@@ -99,12 +96,32 @@ final class OpenListUploadService {
             throw UploadError.duplicateFile(fileName)
         }
 
+        try await sendFile(
+            fileURL: fileURL,
+            remotePath: "\(Self.uploadDirectory)/\(fileName)",
+            overwrite: false
+        )
+    }
+
+    // 既存MP3のタグ編集後に、同じクラウドパスへ置き換える。
+    func replace(fileURL: URL, remotePath: String) async throws {
+        try await sendFile(
+            fileURL: fileURL,
+            remotePath: remotePath,
+            overwrite: true
+        )
+    }
+
+    private func sendFile(
+        fileURL: URL,
+        remotePath: String,
+        overwrite: Bool
+    ) async throws {
         guard let token = try OpenListTokenStore.load(),
               !token.isEmpty else {
             throw UploadError.tokenMissing
         }
 
-        let remotePath = "\(Self.uploadDirectory)/\(fileName)"
         let allowedCharacters = CharacterSet.urlPathAllowed
             .subtracting(CharacterSet(charactersIn: "?#"))
         guard let encodedPath = remotePath.addingPercentEncoding(
@@ -127,7 +144,7 @@ final class OpenListUploadService {
         request.setValue(token, forHTTPHeaderField: "Authorization")
         request.setValue(encodedPath, forHTTPHeaderField: "File-Path")
         request.setValue("false", forHTTPHeaderField: "As-Task")
-        request.setValue("false", forHTTPHeaderField: "Overwrite")
+        request.setValue(overwrite ? "true" : "false", forHTTPHeaderField: "Overwrite")
         request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
         request.setValue(String(fileSize), forHTTPHeaderField: "Content-Length")
 
