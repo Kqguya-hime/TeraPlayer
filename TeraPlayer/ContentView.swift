@@ -290,6 +290,9 @@ struct ContentView: View {
     @State private var uploadProgress = ""
     @State private var uploadFailures: [String] = []
 
+    // MP3楽曲情報編集
+    @State private var selectedMP3ForEditing: OpenListFile? = nil
+
     // プレイヤー
     @State private var player = AVPlayer()
     @State private var isPlaying = false
@@ -580,6 +583,29 @@ struct ContentView: View {
                             }
                         }
                         .disabled(!file.is_dir && !isMusicFile(file))
+                        .contextMenu {
+                            if !file.is_dir &&
+                                file.name.lowercased().hasSuffix(".mp3") &&
+                                !isOfflineMode {
+                                Button {
+                                    selectedMP3ForEditing = file
+                                } label: {
+                                    Label("楽曲情報を編集", systemImage: "pencil")
+                                }
+                            }
+                        }
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            if !file.is_dir &&
+                                file.name.lowercased().hasSuffix(".mp3") &&
+                                !isOfflineMode {
+                                Button {
+                                    selectedMP3ForEditing = file
+                                } label: {
+                                    Label("情報編集", systemImage: "pencil")
+                                }
+                                .tint(.blue)
+                            }
+                        }
                     }
                 }
 
@@ -594,6 +620,22 @@ struct ContentView: View {
         }
         .sheet(item: $queueTarget) { target in
             queueCreationSheet(for: target)
+        }
+        .sheet(item: $selectedMP3ForEditing) { file in
+            MP3MetadataEditorSheet(
+                fileName: file.name,
+                loadMetadata: {
+                    try await loadCloudMP3Metadata(path: makePath(for: file))
+                },
+                saveMetadata: { title, artist, album in
+                    try await saveCloudMP3Metadata(
+                        path: makePath(for: file),
+                        title: title,
+                        artist: artist,
+                        album: album
+                    )
+                }
+            )
         }
     }
 
@@ -2806,6 +2848,107 @@ struct ContentView: View {
         }
     }
 
+    // クラウド上のMP3からID3タグを読み込む
+    private func loadCloudMP3Metadata(path: String) async throws -> MusicTagMetadata {
+        let remoteURL = try await service.getMusicURL(path: path)
+        let (downloadURL, response) = try await URLSession.shared.download(
+            from: remoteURL
+        )
+
+        guard let httpResponse = response as? HTTPURLResponse,
+              (200...299).contains(httpResponse.statusCode) else {
+            throw URLError(.badServerResponse)
+        }
+
+        let temporaryMP3URL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathExtension("mp3")
+
+        defer {
+            try? FileManager.default.removeItem(at: temporaryMP3URL)
+        }
+
+        try FileManager.default.copyItem(
+            at: downloadURL,
+            to: temporaryMP3URL
+        )
+
+        return try MusicTagService().readMetadata(from: temporaryMP3URL)
+    }
+
+    // タグを書き換えた一時ファイルをクラウド上の同じパスへ反映する
+    private func saveCloudMP3Metadata(
+        path: String,
+        title: String,
+        artist: String,
+        album: String
+    ) async throws {
+        let remoteURL = try await service.getMusicURL(path: path)
+        let (downloadURL, response) = try await URLSession.shared.download(
+            from: remoteURL
+        )
+
+        guard let httpResponse = response as? HTTPURLResponse,
+              (200...299).contains(httpResponse.statusCode) else {
+            throw URLError(.badServerResponse)
+        }
+
+        let sourceMP3URL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathExtension("mp3")
+        defer {
+            try? FileManager.default.removeItem(at: sourceMP3URL)
+        }
+
+        try FileManager.default.copyItem(
+            at: downloadURL,
+            to: sourceMP3URL
+        )
+
+        let editedURL = try MusicTagService().makeEditedCopy(
+            of: sourceMP3URL,
+            title: title,
+            artist: artist,
+            album: album
+        )
+        defer {
+            try? FileManager.default.removeItem(at: editedURL)
+        }
+
+        let attributes = try FileManager.default.attributesOfItem(
+            atPath: editedURL.path
+        )
+        let updatedFileSize = (attributes[.size] as? NSNumber)?.int64Value ?? 0
+
+        // クラウドへの置き換えが成功するまでは元ファイルを変更しない。
+        try await OpenListUploadService().replace(
+            fileURL: editedURL,
+            remotePath: path
+        )
+
+        // SwiftDataの表示情報を更新し、古いオフライン音源は破棄する。
+        let descriptor = FetchDescriptor<MusicTrack>(
+            predicate: #Predicate { $0.path == path }
+        )
+
+        if let track = try modelContext.fetch(descriptor).first {
+            track.title = title
+            track.artist = artist.isEmpty ? nil : artist
+            track.album = album.isEmpty ? nil : album
+            track.fileSize = updatedFileSize
+
+            if let localFileName = track.localFileName {
+                try? OfflineMusicStore().deleteFile(localFileName)
+            }
+            track.isDownloaded = false
+            track.localFileName = nil
+
+            try modelContext.save()
+        }
+
+        await loadFiles()
+    }
+
     // フォルダを開く
     private func openFolder(_ folder: OpenListFile) async {
 
@@ -3737,3 +3880,118 @@ struct ContentView: View {
         }
     }
 }
+
+private struct MP3MetadataEditorSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    let fileName: String
+    let loadMetadata: () async throws -> MusicTagMetadata
+    let saveMetadata: (String, String, String) async throws -> Void
+
+    @State private var title = ""
+    @State private var artist = ""
+    @State private var album = ""
+    @State private var isLoading = true
+    @State private var isSaving = false
+    @State private var errorMessage = ""
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("ファイル") {
+                    Text(fileName)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
+                Section("楽曲情報") {
+                    TextField("曲名", text: $title)
+                    TextField("アーティスト名", text: $artist)
+                    TextField("アルバム名", text: $album)
+                }
+
+                if isLoading {
+                    Section {
+                        ProgressView("クラウドから情報を読み込み中...")
+                    }
+                }
+
+                if isSaving {
+                    Section {
+                        ProgressView("変更をクラウドへ保存中...")
+                    }
+                }
+
+                if !errorMessage.isEmpty {
+                    Section {
+                        Text(errorMessage)
+                            .foregroundStyle(.red)
+                    }
+                }
+            }
+            .navigationTitle("楽曲情報の編集")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("キャンセル") {
+                        dismiss()
+                    }
+                    .disabled(isSaving)
+                }
+
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("保存") {
+                        Task {
+                            await save()
+                        }
+                    }
+                    .disabled(isLoading || isSaving || title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+            .task {
+                await load()
+            }
+        }
+    }
+
+    private func load() async {
+        isLoading = true
+        errorMessage = ""
+
+        do {
+            let metadata = try await loadMetadata()
+            title = metadata.title
+            artist = metadata.artist
+            album = metadata.album
+        } catch {
+            errorMessage = "楽曲情報を読み込めませんでした：\(error.localizedDescription)"
+        }
+
+        isLoading = false
+    }
+
+    private func save() async {
+        let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedTitle.isEmpty else {
+            errorMessage = "曲名を入力してください。"
+            return
+        }
+
+        isSaving = true
+        errorMessage = ""
+
+        do {
+            try await saveMetadata(
+                trimmedTitle,
+                artist.trimmingCharacters(in: .whitespacesAndNewlines),
+                album.trimmingCharacters(in: .whitespacesAndNewlines)
+            )
+            dismiss()
+        } catch {
+            errorMessage = "保存に失敗しました：\(error.localizedDescription)"
+        }
+
+        isSaving = false
+    }
+}
+
