@@ -3,6 +3,7 @@ import AVFoundation
 import MediaPlayer
 import SwiftData
 import Charts
+import UniformTypeIdentifiers
 
 @MainActor
 final class NowPlayingManager {
@@ -282,6 +283,12 @@ struct ContentView: View {
     @State private var openListTokenDraft = ""
     @State private var isOpenListTokenConfigured = false
     @State private var openListTokenStatus = ""
+
+    // MP3アップロード
+    @State private var isMP3ImporterPresented = false
+    @State private var isUploadingMP3 = false
+    @State private var uploadProgress = ""
+    @State private var uploadFailures: [String] = []
 
     // プレイヤー
     @State private var player = AVPlayer()
@@ -1454,6 +1461,33 @@ struct ContentView: View {
                     }
                 }
 
+                Section("MP3アップロード") {
+                    Button {
+                        isMP3ImporterPresented = true
+                    } label: {
+                        Label("MP3を選択してアップロード", systemImage: "arrow.up.doc")
+                    }
+                    .disabled(isUploadingMP3 || isOfflineMode)
+
+                    Text("保存先：TeraPlayer Upload")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+
+                    if isUploadingMP3 {
+                        ProgressView(uploadProgress)
+                    } else if !uploadProgress.isEmpty {
+                        Text(uploadProgress)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    ForEach(Array(uploadFailures.enumerated()), id: \.offset) { _, failure in
+                        Text(failure)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
+                }
+
                 Section("再生統計") {
                     NavigationLink {
                         statisticsScreen
@@ -1536,9 +1570,73 @@ struct ContentView: View {
                 }
             }
             .navigationTitle("管理")
+            .fileImporter(
+                isPresented: $isMP3ImporterPresented,
+                allowedContentTypes: [UTType(filenameExtension: "mp3") ?? .audio],
+                allowsMultipleSelection: true
+            ) { result in
+                switch result {
+                case .success(let urls):
+                    Task {
+                        await uploadSelectedMP3Files(urls)
+                    }
+                case .failure(let error):
+                    uploadProgress = "ファイル選択エラー：\(error.localizedDescription)"
+                }
+            }
             .onAppear {
                 loadOpenListTokenStatus()
             }
+        }
+    }
+
+    private func uploadSelectedMP3Files(_ urls: [URL]) async {
+        guard !isUploadingMP3 else { return }
+
+        let mp3URLs = urls.filter {
+            $0.pathExtension.lowercased() == "mp3"
+        }
+
+        guard !mp3URLs.isEmpty else {
+            uploadProgress = "MP3ファイルを選択してください。"
+            return
+        }
+
+        isUploadingMP3 = true
+        uploadProgress = "アップロード準備中..."
+        uploadFailures = []
+
+        defer {
+            isUploadingMP3 = false
+        }
+
+        let uploader = OpenListUploadService()
+        var succeeded = 0
+
+        for (index, url) in mp3URLs.enumerated() {
+            uploadProgress = "\(index + 1) / \(mp3URLs.count) 曲をアップロード中..."
+
+            let hasAccess = url.startAccessingSecurityScopedResource()
+
+            do {
+                try await uploader.upload(fileURL: url)
+                succeeded += 1
+            } catch {
+                uploadFailures.append(
+                    "\(url.lastPathComponent)：\(error.localizedDescription)"
+                )
+            }
+
+            if hasAccess {
+                url.stopAccessingSecurityScopedResource()
+            }
+        }
+
+        uploadProgress = "\(succeeded) / \(mp3URLs.count) 曲のアップロードが完了しました。"
+
+        if succeeded > 0 {
+            await scanLibrary()
+            await loadFiles()
         }
     }
 
