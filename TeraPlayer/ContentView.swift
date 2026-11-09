@@ -292,6 +292,7 @@ struct ContentView: View {
 
     // MP3楽曲情報編集
     @State private var selectedMP3ForEditing: OpenListFile? = nil
+    @State private var isSelectingMP3ForEditing = false
 
     // プレイヤー
     @State private var player = AVPlayer()
@@ -445,7 +446,7 @@ struct ContentView: View {
     private var libraryScreen: some View {
         NavigationStack {
             List {
-                HStack(spacing: 10) {
+                HStack(spacing: 8) {
                     if currentPath != "/terabox" && !isOfflineMode {
                         Button {
                             Task { await goToParentFolder() }
@@ -455,7 +456,20 @@ struct ContentView: View {
                         .buttonStyle(.bordered)
                     }
 
-                    Spacer(minLength: 8)
+                    if !isOfflineMode {
+                        Button {
+                            isSelectingMP3ForEditing.toggle()
+                        } label: {
+                            Label(
+                                isSelectingMP3ForEditing ? "選択をキャンセル" : "楽曲情報編集",
+                                systemImage: isSelectingMP3ForEditing ? "xmark" : "pencil"
+                            )
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(isSelectingMP3ForEditing ? .orange : .blue)
+                    }
+
+                    Spacer(minLength: 4)
 
                     Button {
                         Task { await loadFiles() }
@@ -562,12 +576,19 @@ struct ContentView: View {
                         Button {
                             if file.is_dir {
                                 Task { await openFolder(file) }
+                            } else if isSelectingMP3ForEditing {
+                                if file.name.lowercased().hasSuffix(".mp3") && !isOfflineMode {
+                                    selectedMP3ForEditing = file
+                                    isSelectingMP3ForEditing = false
+                                } else {
+                                    errorMessage = "楽曲情報を編集できるのはオンラインのMP3ファイルのみです。"
+                                }
                             } else if isMusicFile(file) {
                                 enqueueOrPlay(file)
                             }
                         } label: {
                             HStack {
-                                Image(systemName: file.is_dir ? "folder.fill" : "music.note")
+                                Image(systemName: file.is_dir ? "folder.fill" : (isSelectingMP3ForEditing ? "pencil" : "music.note"))
                                 VStack(alignment: .leading) {
                                     Text(file.name)
                                         .foregroundStyle(.primary)
@@ -576,36 +597,18 @@ struct ContentView: View {
                                         .foregroundStyle(.secondary)
                                 }
                                 Spacer()
-                                if isMusicFile(file) {
+                                if isSelectingMP3ForEditing && !file.is_dir && file.name.lowercased().hasSuffix(".mp3") {
+                                    Image(systemName: "pencil.circle.fill")
+                                        .foregroundStyle(.blue)
+                                } else if isMusicFile(file) {
                                     Image(systemName: "text.badge.plus")
                                         .foregroundStyle(appearanceTheme == "light" ? Color(red: 0.58, green: 0.39, blue: 0.28) : .blue)
                                 }
                             }
+                            .contentShape(Rectangle())
                         }
+                        .buttonStyle(.plain)
                         .disabled(!file.is_dir && !isMusicFile(file))
-                        .contextMenu {
-                            if !file.is_dir &&
-                                file.name.lowercased().hasSuffix(".mp3") &&
-                                !isOfflineMode {
-                                Button {
-                                    selectedMP3ForEditing = file
-                                } label: {
-                                    Label("楽曲情報を編集", systemImage: "pencil")
-                                }
-                            }
-                        }
-                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                            if !file.is_dir &&
-                                file.name.lowercased().hasSuffix(".mp3") &&
-                                !isOfflineMode {
-                                Button {
-                                    selectedMP3ForEditing = file
-                                } label: {
-                                    Label("情報編集", systemImage: "pencil")
-                                }
-                                .tint(.blue)
-                            }
-                        }
                     }
                 }
 
