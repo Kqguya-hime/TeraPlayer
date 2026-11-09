@@ -361,6 +361,8 @@ struct ContentView: View {
         .tabViewStyle(.automatic)
         .toolbar(.hidden, for: .tabBar)
         .preferredColorScheme(appearanceTheme == "light" ? .light : nil)
+        .tint(appearanceTheme == "light" ? Color(red: 0.58, green: 0.39, blue: 0.28) : .blue)
+        .toolbarBackground(appearanceTheme == "light" ? Color(red: 0.98, green: 0.97, blue: 0.94) : Color.clear, for: .navigationBar)
         .safeAreaInset(edge: .top, spacing: 0) {
             Picker("画面", selection: $selectedTab) {
                 Text("楽曲").tag(0)
@@ -371,7 +373,7 @@ struct ContentView: View {
             .pickerStyle(.segmented)
             .padding(.horizontal)
             .padding(.vertical, 8)
-            .background(.bar)
+            .background(appearanceTheme == "light" ? Color(red: 0.98, green: 0.97, blue: 0.94) : Color(.systemBackground))
         }
         .safeAreaInset(edge: .bottom) {
             playerControls
@@ -556,7 +558,7 @@ struct ContentView: View {
                                 Spacer()
                                 if isMusicFile(file) {
                                     Image(systemName: "text.badge.plus")
-                                        .foregroundStyle(.blue)
+                                        .foregroundStyle(appearanceTheme == "light" ? Color(red: 0.58, green: 0.39, blue: 0.28) : .blue)
                                 }
                             }
                         }
@@ -1241,7 +1243,7 @@ struct ContentView: View {
                                 .foregroundStyle(.secondary)
                                 .frame(maxWidth: .infinity)
                                 .frame(height: 170)
-                                .background(.quaternary)
+                                .background(appearanceTheme == "light" ? Color(red: 0.93, green: 0.89, blue: 0.82) : Color(.quaternarySystemFill))
                                 .clipShape(RoundedRectangle(cornerRadius: 16))
 
                             VStack(spacing: 6) {
@@ -1603,7 +1605,7 @@ struct ContentView: View {
                             x: .value("再生回数", item.playCount),
                             y: .value("楽曲", item.title)
                         )
-                        .foregroundStyle(.blue)
+                        .foregroundStyle(appearanceTheme == "light" ? Color(red: 0.68, green: 0.49, blue: 0.36) : .blue)
                     }
                     .chartXAxisLabel("再生回数")
                     .frame(height: CGFloat(max(trackStatistics.count * 34, 180)))
@@ -3608,7 +3610,7 @@ struct ContentView: View {
             .padding(.horizontal)
             .padding(.bottom, 8)
         }
-        .background(.regularMaterial)
+        .background(appearanceTheme == "light" ? Color(red: 0.98, green: 0.97, blue: 0.94) : Color(.secondarySystemBackground))
     }
 
     // リピートアイコン
