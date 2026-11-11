@@ -2827,6 +2827,12 @@ struct ContentView: View {
 
     private func loadFiles() async {
 
+        // 起動処理・Wi-Fi検知・画面更新による同時取得を防ぐ
+        guard !isLoading else {
+            print("ライブラリ取得をスキップ：別の取得処理が実行中")
+            return
+        }
+
         isLoading = true
         errorMessage = ""
 
@@ -2835,7 +2841,8 @@ struct ContentView: View {
         }
 
         do {
-            files = try await service.getFiles(path: currentPath)
+            let loadedFiles = try await service.getFiles(path: currentPath)
+            files = loadedFiles
 
             if isOfflineMode {
                 libraryScanStatus = "オンラインライブラリに再接続しました"
@@ -2847,7 +2854,8 @@ struct ContentView: View {
             isOfflineMode = true
             files = makeOfflineFiles()
             libraryScanStatus = "オフラインモード：保存済み \(files.count) 曲"
-            errorMessage = ""
+            errorMessage = "OpenList接続エラー：\(error.localizedDescription)"
+            print("OpenList接続エラー: \(String(reflecting: error))")
         }
     }
 
