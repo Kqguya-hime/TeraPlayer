@@ -234,7 +234,7 @@ final class OpenListUploadService {
         let fileSize = (attributes[.size] as? NSNumber)?.int64Value ?? 0
 
         var request = URLRequest(url: url)
-        request.timeoutInterval = 300
+        request.timeoutInterval = 1800
         request.httpMethod = "PUT"
         request.setValue(token, forHTTPHeaderField: "Authorization")
         request.setValue(encodedPath, forHTTPHeaderField: "File-Path")
