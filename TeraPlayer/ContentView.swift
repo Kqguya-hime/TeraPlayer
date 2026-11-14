@@ -1559,14 +1559,14 @@ struct ContentView: View {
                                     do {
                                         try modelContext.save()
                                     } catch {
-                                        errorMessage = "プレイリストに追加できませんでした: \\(error.localizedDescription)"
+                                        errorMessage = "プレイリストに追加できませんでした: \(error.localizedDescription)"
                                     }
                                 } label: {
                                     HStack {
                                         VStack(alignment: .leading, spacing: 3) {
                                             Text(playlist.name)
                                                 .foregroundStyle(.primary)
-                                            Text("\\(playlist.trackPaths.count)曲")
+                                            Text("\(playlist.trackPaths.count)曲")
                                                 .font(.caption)
                                                 .foregroundStyle(.secondary)
                                         }
