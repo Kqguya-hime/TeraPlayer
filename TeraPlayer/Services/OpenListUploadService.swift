@@ -9,6 +9,7 @@ final class OpenListUploadService {
         case invalidResponse
         case serverError(Int, String)
         case duplicateFile(String)
+        case recoveryFailed(String, String, String)
 
         var errorDescription: String? {
             switch self {
@@ -20,6 +21,8 @@ final class OpenListUploadService {
                 return "アップロードエラー (\(code)): \(message)"
             case .duplicateFile(let name):
                 return "同名ファイルがアップロード先に存在します：\(name)"
+            case .recoveryFailed(let originalName, let backupName, let reason):
+                return "置き換えに失敗し、元ファイルを自動復元できませんでした。元の名前：\(originalName)、退避ファイル：\(backupName)。原因：\(reason)"
             }
         }
     }
@@ -99,24 +102,114 @@ final class OpenListUploadService {
 
         try await sendFile(
             fileURL: fileURL,
-            remotePath: "\(Self.uploadDirectory)/\(fileName)",
-            overwrite: false
+            remotePath: "\(Self.uploadDirectory)/\(fileName)"
         )
     }
 
-    // 既存MP3のタグ編集後に、同じクラウドパスへ置き換える。
+    // TeraBoxドライバーは同名ファイルのアップロードを自動リネームするため、
+    // 一時名でアップロードしてから、既存ファイルと安全に入れ替える。
     func replace(fileURL: URL, remotePath: String) async throws {
-        try await sendFile(
-            fileURL: fileURL,
-            remotePath: remotePath,
-            overwrite: true
+        let parentPath = (remotePath as NSString).deletingLastPathComponent
+        let originalName = (remotePath as NSString).lastPathComponent
+        let fileExtension = (originalName as NSString).pathExtension
+        let extensionSuffix = fileExtension.isEmpty ? "" : ".\(fileExtension)"
+
+        let stagingName = ".teraplayer-edit-\(UUID().uuidString)\(extensionSuffix)"
+        let backupName = ".teraplayer-backup-\(UUID().uuidString)\(extensionSuffix)"
+        let stagingPath = "\(parentPath)/\(stagingName)"
+        let backupPath = "\(parentPath)/\(backupName)"
+
+        // 先に新しい内容を別名で完全アップロードする。元ファイルには触れない。
+        try await sendFile(fileURL: fileURL, remotePath: stagingPath)
+
+        // 元ファイルを一時バックアップ名へ退避する。
+        do {
+            try await renameFile(path: remotePath, newName: backupName)
+        } catch {
+            try? await removeFile(directory: parentPath, name: stagingName)
+            throw error
+        }
+
+        // 新しいファイルを元の名前へ変更する。
+        do {
+            try await renameFile(path: stagingPath, newName: originalName)
+        } catch {
+            // 置き換えに失敗した場合は、元ファイルを元の名前へ戻す。
+            do {
+                try await renameFile(path: backupPath, newName: originalName)
+                try? await removeFile(directory: parentPath, name: stagingName)
+            } catch {
+                throw UploadError.recoveryFailed(
+                    originalName,
+                    backupName,
+                    error.localizedDescription
+                )
+            }
+            throw error
+        }
+
+        // 新しい元ファイル名への配置が成功した後にだけ、バックアップを削除する。
+        do {
+            try await removeFile(directory: parentPath, name: backupName)
+        } catch {
+            // クラウド上の本体は更新済み。バックアップ削除失敗はログに残す。
+            print("編集前バックアップの削除に失敗: \(backupPath) / \(error.localizedDescription)")
+        }
+    }
+
+    private func renameFile(path: String, newName: String) async throws {
+        try await performFileOperation(
+            endpoint: "rename",
+            body: ["path": path, "name": newName]
         )
+    }
+
+    private func removeFile(directory: String, name: String) async throws {
+        try await performFileOperation(
+            endpoint: "remove",
+            body: ["dir": directory, "names": [name]]
+        )
+    }
+
+    private func performFileOperation(
+        endpoint: String,
+        body: [String: Any]
+    ) async throws {
+        guard let token = try OpenListTokenStore.load(), !token.isEmpty else {
+            throw UploadError.tokenMissing
+        }
+
+        guard let url = URL(string: "\(baseURL)/api/fs/\(endpoint)") else {
+            throw UploadError.invalidResponse
+        }
+
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 1800
+        request.httpMethod = "POST"
+        request.setValue(token, forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let (data, response) = try await OpenListNetworkSession.shared.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse,
+              (200...299).contains(httpResponse.statusCode) else {
+            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? -1
+            throw UploadError.serverError(
+                statusCode,
+                HTTPURLResponse.localizedString(forStatusCode: statusCode)
+            )
+        }
+
+        let result = try JSONDecoder().decode(OpenListUploadResponse.self, from: data)
+        guard result.code == 200 else {
+            throw UploadError.serverError(result.code, result.message)
+        }
     }
 
     private func sendFile(
         fileURL: URL,
-        remotePath: String,
-        overwrite: Bool
+        remotePath: String
     ) async throws {
         guard let token = try OpenListTokenStore.load(),
               !token.isEmpty else {
@@ -146,7 +239,6 @@ final class OpenListUploadService {
         request.setValue(token, forHTTPHeaderField: "Authorization")
         request.setValue(encodedPath, forHTTPHeaderField: "File-Path")
         request.setValue("false", forHTTPHeaderField: "As-Task")
-        request.setValue(overwrite ? "true" : "false", forHTTPHeaderField: "Overwrite")
         request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
         request.setValue(String(fileSize), forHTTPHeaderField: "Content-Length")
 
