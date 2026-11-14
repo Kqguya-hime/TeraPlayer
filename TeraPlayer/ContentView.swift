@@ -3961,7 +3961,7 @@ private struct MP3MetadataEditorSheet: View {
 
                 if isLoading {
                     Section {
-                        ProgressView("クラウドから情報を読み込み中...")
+                        ProgressView("楽曲情報を読み込み中...")
                     }
                 }
 
