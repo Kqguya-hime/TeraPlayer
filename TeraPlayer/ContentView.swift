@@ -2859,17 +2859,40 @@ struct ContentView: View {
         }
     }
 
-    // クラウド上のMP3からID3タグを読み込む
-    private func loadCloudMP3Metadata(path: String) async throws -> MusicTagMetadata {
+    // オフライン保存済みファイルが存在すれば、クラウドから再取得せず利用する。
+    private func offlineMP3Source(path: String) throws -> (MusicTrack?, URL?) {
+        let descriptor = FetchDescriptor<MusicTrack>(
+            predicate: #Predicate { $0.path == path }
+        )
+        let track = try modelContext.fetch(descriptor).first
+
+        guard let track,
+              track.isDownloaded,
+              let localFileName = track.localFileName else {
+            return (track, nil)
+        }
+
+        let store = OfflineMusicStore()
+        guard try store.fileExists(localFileName) else {
+            return (track, nil)
+        }
+
+        return (track, try store.localURL(for: localFileName))
+    }
+
+    // クラウドからMP3を取得し、TagLibが扱いやすい一時的な.mp3ファイルにする。
+    private func downloadCloudMP3ToTemporaryFile(path: String) async throws -> URL {
         let remoteURL = try await service.getMusicURL(path: path)
-        var downloadRequest = URLRequest(url: remoteURL)
-        downloadRequest.timeoutInterval = 300
+        var request = URLRequest(url: remoteURL)
+        request.timeoutInterval = 1800
+
         let (downloadURL, response) = try await OpenListNetworkSession.shared.download(
-            for: downloadRequest
+            for: request
         )
 
         guard let httpResponse = response as? HTTPURLResponse,
               (200...299).contains(httpResponse.statusCode) else {
+            try? FileManager.default.removeItem(at: downloadURL)
             throw URLError(.badServerResponse)
         }
 
@@ -2877,48 +2900,56 @@ struct ContentView: View {
             .appendingPathComponent(UUID().uuidString)
             .appendingPathExtension("mp3")
 
-        defer {
+        do {
+            try FileManager.default.copyItem(at: downloadURL, to: temporaryMP3URL)
+            try? FileManager.default.removeItem(at: downloadURL)
+            return temporaryMP3URL
+        } catch {
+            try? FileManager.default.removeItem(at: downloadURL)
             try? FileManager.default.removeItem(at: temporaryMP3URL)
+            throw error
+        }
+    }
+
+    // MP3のタグを読み込む。オフライン保存済みならローカルファイルを優先する。
+    private func loadCloudMP3Metadata(path: String) async throws -> MusicTagMetadata {
+        let (_, localURL) = try offlineMP3Source(path: path)
+
+        if let localURL {
+            return try MusicTagService().readMetadata(from: localURL)
         }
 
-        try FileManager.default.copyItem(
-            at: downloadURL,
-            to: temporaryMP3URL
-        )
+        let temporaryMP3URL = try await downloadCloudMP3ToTemporaryFile(path: path)
+        defer { try? FileManager.default.removeItem(at: temporaryMP3URL) }
 
         return try MusicTagService().readMetadata(from: temporaryMP3URL)
     }
 
-    // タグを書き換えた一時ファイルをクラウド上の同じパスへ反映する
+    // 編集後のMP3をクラウドへ反映し、オフライン保存済み音源も同時に更新する。
     private func saveCloudMP3Metadata(
         path: String,
         title: String,
         artist: String,
         album: String
     ) async throws {
-        let remoteURL = try await service.getMusicURL(path: path)
-        var downloadRequest = URLRequest(url: remoteURL)
-        downloadRequest.timeoutInterval = 300
-        let (downloadURL, response) = try await OpenListNetworkSession.shared.download(
-            for: downloadRequest
-        )
+        let (track, localURL) = try offlineMP3Source(path: path)
+        let sourceMP3URL: URL
+        let sourceIsTemporary: Bool
 
-        guard let httpResponse = response as? HTTPURLResponse,
-              (200...299).contains(httpResponse.statusCode) else {
-            throw URLError(.badServerResponse)
+        if let localURL {
+            // 端末に保存済みなら、そのファイルを編集元にする。
+            sourceMP3URL = localURL
+            sourceIsTemporary = false
+        } else {
+            sourceMP3URL = try await downloadCloudMP3ToTemporaryFile(path: path)
+            sourceIsTemporary = true
         }
 
-        let sourceMP3URL = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString)
-            .appendingPathExtension("mp3")
         defer {
-            try? FileManager.default.removeItem(at: sourceMP3URL)
+            if sourceIsTemporary {
+                try? FileManager.default.removeItem(at: sourceMP3URL)
+            }
         }
-
-        try FileManager.default.copyItem(
-            at: downloadURL,
-            to: sourceMP3URL
-        )
 
         let editedURL = try MusicTagService().makeEditedCopy(
             of: sourceMP3URL,
@@ -2926,13 +2957,9 @@ struct ContentView: View {
             artist: artist,
             album: album
         )
-        defer {
-            try? FileManager.default.removeItem(at: editedURL)
-        }
+        defer { try? FileManager.default.removeItem(at: editedURL) }
 
-        let attributes = try FileManager.default.attributesOfItem(
-            atPath: editedURL.path
-        )
+        let attributes = try FileManager.default.attributesOfItem(atPath: editedURL.path)
         let updatedFileSize = (attributes[.size] as? NSNumber)?.int64Value ?? 0
 
         // クラウドへの置き換えが成功するまでは元ファイルを変更しない。
@@ -2942,20 +2969,14 @@ struct ContentView: View {
         )
 
         // クラウド更新成功後、SwiftDataとオフライン保存ファイルを同期する。
-        let descriptor = FetchDescriptor<MusicTrack>(
-            predicate: #Predicate { $0.path == path }
-        )
-
-        if let track = try modelContext.fetch(descriptor).first {
+        if let track {
             track.title = title
             track.artist = artist.isEmpty ? nil : artist
             track.album = album.isEmpty ? nil : album
             track.fileSize = updatedFileSize
 
-            // オフライン保存済みなら、同じ保存名のまま編集後MP3へ置き換える。
-            // これにより再生回数・お気に入り・履歴・pathを維持したまま、
-            // オフライン再生も引き続き利用できる。
-            if let localFileName = track.localFileName {
+            // オフライン保存済みの場合だけ、既存の保存名を維持して内容を置き換える。
+            if track.isDownloaded, let localFileName = track.localFileName {
                 do {
                     try OfflineMusicStore().replaceDownloadedFile(
                         from: editedURL,
@@ -2963,8 +2984,7 @@ struct ContentView: View {
                     )
                     track.isDownloaded = true
                 } catch {
-                    // クラウド側は更新済み。古いローカル音源を誤再生しないよう
-                    // ダウンロード状態を解除し、次回の保存で再取得できるようにする。
+                    // クラウド側は更新済み。古いローカル音源は誤再生させない。
                     print("オフライン音源の更新に失敗: \(error.localizedDescription)")
                     try? OfflineMusicStore().deleteFile(localFileName)
                     track.isDownloaded = false
