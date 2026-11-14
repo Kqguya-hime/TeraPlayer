@@ -88,6 +88,49 @@ final class OfflineMusicStore {
         }
     }
     
+    // タグ編集後のMP3で、既存のオフライン保存ファイルを安全に置き換える。
+    // 置き換えに失敗した場合は元ファイルを元の場所へ戻す。
+    func replaceDownloadedFile(
+        from sourceURL: URL,
+        localFileName: String
+    ) throws {
+        let fileManager = FileManager.default
+        let directory = try directoryURL()
+        let destinationURL = directory.appendingPathComponent(localFileName)
+        let replacementURL = directory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathExtension(destinationURL.pathExtension)
+        let backupURL = directory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathExtension("backup")
+
+        try fileManager.copyItem(at: sourceURL, to: replacementURL)
+
+        var originalMovedToBackup = false
+
+        do {
+            if fileManager.fileExists(atPath: destinationURL.path) {
+                try fileManager.moveItem(at: destinationURL, to: backupURL)
+                originalMovedToBackup = true
+            }
+
+            try fileManager.moveItem(at: replacementURL, to: destinationURL)
+
+            if originalMovedToBackup {
+                try? fileManager.removeItem(at: backupURL)
+            }
+        } catch {
+            try? fileManager.removeItem(at: replacementURL)
+
+            if originalMovedToBackup,
+               !fileManager.fileExists(atPath: destinationURL.path) {
+                try? fileManager.moveItem(at: backupURL, to: destinationURL)
+            }
+
+            throw error
+        }
+    }
+
     // MARK: - ダウンロード
     
     // クラウド上のファイルをダウンロードして保存する
