@@ -82,6 +82,7 @@ final class OpenListService {
         let url = URL(string: "\(baseURL)/api/fs/list")!
 
         var request = URLRequest(url: url)
+        request.timeoutInterval = 300
         request.httpMethod = "POST"
         request.setValue(token, forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -137,6 +138,7 @@ final class OpenListService {
         let url = URL(string: "\(baseURL)/api/fs/get")!
 
         var request = URLRequest(url: url)
+        request.timeoutInterval = 300
         request.httpMethod = "POST"
         request.setValue(token, forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
