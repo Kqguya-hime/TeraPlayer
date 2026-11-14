@@ -344,6 +344,13 @@ struct ContentView: View {
         case unplayed
     }
 
+    private enum ShuffleScope: String, CaseIterable, Identifiable {
+        case trackFolder = "現在のフォルダ"
+        case allLibrary = "全ライブラリ"
+        var id: String { rawValue }
+    }
+
+    @State private var shuffleScope: ShuffleScope = .trackFolder
     @State private var libraryBrowseMode = "曲"
     @State private var selectedArtist: String? = nil
     @State private var selectedAlbum: String? = nil
@@ -478,6 +485,14 @@ struct ContentView: View {
                     }
                     .buttonStyle(.bordered)
                 }
+
+                Button {
+                    startAllLibraryShuffle()
+                } label: {
+                    Label("全ライブラリ・シャッフル再生", systemImage: "shuffle")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(.bordered)
 
                 Picker("表示", selection: $libraryBrowseMode) {
                     Text("曲").tag("曲")
@@ -1389,6 +1404,13 @@ struct ContentView: View {
                             .frame(maxWidth: .infinity)
 
                             HStack {
+                                Menu {
+                                    Button("現在のフォルダ") { setShuffleScope(.trackFolder) }
+                                    Button("全ライブラリ") { setShuffleScope(.allLibrary) }
+                                } label: {
+                                    Label(shuffleScopeTitle, systemImage: "folder")
+                                }
+
                                 Menu {
                                     Button("OFF") { setShuffleMode(.off) }
                                     Button("通常シャッフル") { setShuffleMode(.normal) }
@@ -3276,52 +3298,91 @@ struct ContentView: View {
         }
     }
 
+    // シャッフル対象の楽曲をSwiftDataから取得する
+    private var shuffleCandidateTracks: [MusicTrack] {
+        switch shuffleScope {
+        case .allLibrary:
+            return musicTracks
+        case .trackFolder:
+            let referencePath = currentTrack?.path ?? currentPath
+            let folderPath = (referencePath as NSString).deletingLastPathComponent
+            return musicTracks.filter {
+                (($0.path as NSString).deletingLastPathComponent) == folderPath
+            }
+        }
+    }
+
+    private func queueItem(for track: MusicTrack, source: QueueSource) -> QueueItem {
+        QueueItem(
+            file: OpenListFile(
+                name: track.fileName,
+                size: track.fileSize,
+                is_dir: false,
+                modified: track.cloudModified,
+                created: nil,
+                sign: track.cloudSign,
+                path: track.path
+            ),
+            path: track.path,
+            source: source
+        )
+    }
+
     // ランダム選曲
     private func fillShuffleQueue() {
-
-        guard isShuffle else {
-            return
-        }
-
-        // 現在の自動選曲数
-        let automaticCount = queue.filter {
-            $0.source == .shuffle
-        }.count
-
-        // 10曲に足りない分だけ補充
+        guard isShuffle else { return }
+        let automaticCount = queue.filter { $0.source == .shuffle }.count
         let neededCount = shuffleQueueCount - automaticCount
+        guard neededCount > 0 else { return }
 
-        guard neededCount > 0 else {
+        let excludedPaths = Set(queue.map(\.path)).union(
+            currentTrack.map { [$0.path] } ?? []
+        )
+        let candidates = shuffleCandidateTracks.filter {
+            !excludedPaths.contains($0.path)
+        }
+        let items = candidates.shuffled()
+            .prefix(neededCount)
+            .map { queueItem(for: $0, source: .shuffle) }
+        queue.append(contentsOf: items)
+    }
+
+    // 全ライブラリからシャッフル再生を開始する
+    private func startAllLibraryShuffle() {
+        guard let selectedTrack = musicTracks.randomElement() else {
+            errorMessage = "ライブラリに再生できる楽曲がありません"
             return
         }
 
-        // 現在のフォルダ内の音楽ファイルを取得
-        let candidates = files
-            .filter { isMusicFile($0) }
-            .map { file in
-                QueueItem(
-                    file: file,
-                    path: makePath(for: file),
-                    source: .shuffle
-                )
-            }
-            .filter { item in
+        shuffleScope = .allLibrary
+        isPlaylistPlayback = false
+        activeRefillCondition = nil
+        queue.removeAll()
 
-                // 現在再生中の曲を除外
-                item.path != currentTrack?.path
+        let wasNormalShuffle = isShuffle
+        isShuffle = true
+        isUnplayedShuffle = false
+        if !wasNormalShuffle { normalShuffleNeedsReset = true }
 
-                // キューに存在する曲を除外
-                && !queue.contains {
-                    $0.path == item.path
-                }
-            }
+        let item = queueItem(for: selectedTrack, source: .shuffle)
+        Task {
+            let success = await startTrack(item)
+            if success { fillActiveShuffleQueue() }
+        }
+    }
 
-        // ランダムに選んで追加
-        let selectedItems = Array(
-            candidates.shuffled().prefix(neededCount)
-        )
+    private var shuffleScopeTitle: String {
+        shuffleScope.rawValue
+    }
 
-        queue.append(contentsOf: selectedItems)
+    // 再生範囲を切り替える
+    private func setShuffleScope(_ scope: ShuffleScope) {
+        guard shuffleScope != scope else { return }
+        shuffleScope = scope
+        queue.removeAll { $0.source == .shuffle || $0.source == .unplayedShuffle }
+        if activeRefillCondition == nil && !isPlaylistPlayback {
+            fillActiveShuffleQueue()
+        }
     }
 
     // 選択中のシャッフル方式
@@ -3376,12 +3437,11 @@ struct ContentView: View {
         }
     }
 
-    // 未再生フラグを全曲リセットする
+    // 現在のシャッフル範囲内の未再生フラグをリセットする
     private func resetUnplayedShuffleFlags() {
-        for track in musicTracks {
+        for track in shuffleCandidateTracks {
             track.hasBeenPlayedInUnplayedShuffle = false
         }
-
         do {
             try modelContext.save()
         } catch {
@@ -3389,32 +3449,29 @@ struct ContentView: View {
         }
     }
 
-    // ライブラリ全体から未再生曲をランダムにキューへ追加する
+    // 選択範囲内の未再生曲をランダムにキューへ追加する
     private func fillUnplayedShuffleQueue() {
         guard isUnplayedShuffle else { return }
 
-        let queuedUnplayedCount = queue.filter {
-            $0.source == .unplayedShuffle
-        }.count
-        let neededCount = shuffleQueueCount - queuedUnplayedCount
+        let queuedCount = queue.filter { $0.source == .unplayedShuffle }.count
+        let neededCount = shuffleQueueCount - queuedCount
         guard neededCount > 0 else { return }
 
-        var unplayedTracks = musicTracks.filter {
+        var unplayedTracks = shuffleCandidateTracks.filter {
             $0.hasBeenPlayedInUnplayedShuffle != true
         }
 
-        // 全曲が再生済みなら新しいサイクルを開始する
-        if unplayedTracks.isEmpty && !musicTracks.isEmpty {
+        if unplayedTracks.isEmpty && !shuffleCandidateTracks.isEmpty {
             resetUnplayedShuffleFlags()
 
-            // サイクル開始時点ですでに再生中の曲は、新サイクルでも再生済みにする
             if let currentPath = currentTrack?.path,
-               let current = musicTracks.first(where: { $0.path == currentPath }) {
+               let current = musicTracks.first(where: { $0.path == currentPath }),
+               shuffleCandidateTracks.contains(where: { $0.path == currentPath }) {
                 current.hasBeenPlayedInUnplayedShuffle = true
                 try? modelContext.save()
             }
 
-            unplayedTracks = musicTracks.filter {
+            unplayedTracks = shuffleCandidateTracks.filter {
                 $0.hasBeenPlayedInUnplayedShuffle != true
             }
         }
@@ -3425,24 +3482,9 @@ struct ContentView: View {
         let candidates = unplayedTracks.filter {
             !excludedPaths.contains($0.path)
         }
-
-        let selectedTracks = Array(candidates.shuffled().prefix(neededCount))
-        let items = selectedTracks.map { track in
-            QueueItem(
-                file: OpenListFile(
-                    name: track.fileName,
-                    size: track.fileSize,
-                    is_dir: false,
-                    modified: track.cloudModified,
-                    created: nil,
-                    sign: track.cloudSign,
-                    path: track.path
-                ),
-                path: track.path,
-                source: .unplayedShuffle
-            )
-        }
-
+        let items = candidates.shuffled()
+            .prefix(neededCount)
+            .map { queueItem(for: $0, source: .unplayedShuffle) }
         queue.append(contentsOf: items)
     }
 
@@ -3840,6 +3882,14 @@ struct ContentView: View {
                         }
                 }
                 .accessibilityLabel("再生キュー")
+
+                // 再生範囲
+                Menu {
+                    Button("現在のフォルダ") { setShuffleScope(.trackFolder) }
+                    Button("全ライブラリ") { setShuffleScope(.allLibrary) }
+                } label: {
+                    Image(systemName: "folder")
+                }
 
                 // シャッフル方式
                 Menu {
