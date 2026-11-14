@@ -253,6 +253,7 @@ struct ContentView: View {
     @State private var playlistPlaybackOperation: QueueOperation = .replace
     @State private var playlistPlaybackShuffle = false
     @State private var isPlaylistPlayback = false
+    @State private var isNowPlayingPlaylistPickerPresented = false
 
     // ライブラリスキャンの状態
     @State private var isScanningLibrary = false
@@ -1462,6 +1463,15 @@ struct ContentView: View {
                             }
                             .font(.caption)
                             .buttonStyle(.plain)
+
+                            Button {
+                                isNowPlayingPlaylistPickerPresented = true
+                            } label: {
+                                Label("プレイリストに追加", systemImage: "plus")
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.bordered)
+                            .disabled(currentTrack == nil)
                         }
                         .padding(.vertical, 10)
                     } else {
@@ -1513,6 +1523,88 @@ struct ContentView: View {
             }
             .navigationTitle("再生")
         }
+        .sheet(isPresented: $isNowPlayingPlaylistPickerPresented) {
+            nowPlayingPlaylistPickerSheet
+        }
+    }
+
+    private var nowPlayingPlaylistPickerSheet: some View {
+        NavigationStack {
+            List {
+                if let track = currentTrack {
+                    Section("追加する楽曲") {
+                        Text(musicTracks.first(where: { $0.path == track.path })?.title
+                             ?? (track.file.name as NSString).deletingPathExtension)
+                            .font(.headline)
+                        Text(musicTracks.first(where: { $0.path == track.path })?.artist
+                             ?? "アーティスト情報なし")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Section("追加先のプレイリスト") {
+                        if playlists.isEmpty {
+                            ContentUnavailableView(
+                                "プレイリストがありません",
+                                systemImage: "music.note.list",
+                                description: Text("先にプレイリスト画面で作成してください")
+                            )
+                        } else {
+                            ForEach(playlists.sorted { $0.createdAt < $1.createdAt }) { playlist in
+                                let alreadyAdded = playlist.trackPaths.contains(track.path)
+                                Button {
+                                    guard !alreadyAdded else { return }
+                                    playlist.trackPaths.append(track.path)
+                                    playlist.updatedAt = Date()
+                                    do {
+                                        try modelContext.save()
+                                    } catch {
+                                        errorMessage = "プレイリストに追加できませんでした: \\(error.localizedDescription)"
+                                    }
+                                } label: {
+                                    HStack {
+                                        VStack(alignment: .leading, spacing: 3) {
+                                            Text(playlist.name)
+                                                .foregroundStyle(.primary)
+                                            Text("\\(playlist.trackPaths.count)曲")
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                        }
+                                        Spacer()
+                                        if alreadyAdded {
+                                            Label("追加済み", systemImage: "checkmark.circle.fill")
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                        } else {
+                                            Image(systemName: "plus.circle")
+                                                .foregroundStyle(.blue)
+                                        }
+                                    }
+                                    .contentShape(Rectangle())
+                                }
+                                .disabled(alreadyAdded)
+                            }
+                        }
+                    }
+                } else {
+                    ContentUnavailableView(
+                        "再生していません",
+                        systemImage: "music.note",
+                        description: Text("楽曲を再生してから操作してください")
+                    )
+                }
+            }
+            .navigationTitle("プレイリストに追加")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("閉じる") {
+                        isNowPlayingPlaylistPickerPresented = false
+                    }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
     }
 
     private var managementScreen: some View {
