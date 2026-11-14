@@ -3299,14 +3299,25 @@ struct ContentView: View {
     }
 
     // シャッフル対象の楽曲をSwiftDataから取得する
+    private var availableShuffleTracks: [MusicTrack] {
+        if isOfflineMode {
+            return musicTracks.filter { $0.isDownloaded && $0.localFileName != nil }
+        }
+        return musicTracks
+    }
+
     private var shuffleCandidateTracks: [MusicTrack] {
         switch shuffleScope {
         case .allLibrary:
-            return musicTracks
+            return availableShuffleTracks
         case .trackFolder:
-            let referencePath = currentTrack?.path ?? currentPath
-            let folderPath = (referencePath as NSString).deletingLastPathComponent
-            return musicTracks.filter {
+            let folderPath: String
+            if let currentTrack {
+                folderPath = (currentTrack.path as NSString).deletingLastPathComponent
+            } else {
+                folderPath = currentPath
+            }
+            return availableShuffleTracks.filter {
                 (($0.path as NSString).deletingLastPathComponent) == folderPath
             }
         }
@@ -3349,7 +3360,10 @@ struct ContentView: View {
 
     // 全ライブラリからシャッフル再生を開始する
     private func startAllLibraryShuffle() {
-        guard let selectedTrack = musicTracks.randomElement() else {
+        let availableTracks = isOfflineMode
+            ? musicTracks.filter { $0.isDownloaded && $0.localFileName != nil }
+            : musicTracks
+        guard let selectedTrack = availableTracks.randomElement() else {
             errorMessage = "ライブラリに再生できる楽曲がありません"
             return
         }
@@ -3359,10 +3373,9 @@ struct ContentView: View {
         activeRefillCondition = nil
         queue.removeAll()
 
-        let wasNormalShuffle = isShuffle
         isShuffle = true
         isUnplayedShuffle = false
-        if !wasNormalShuffle { normalShuffleNeedsReset = true }
+        normalShuffleNeedsReset = true
 
         let item = queueItem(for: selectedTrack, source: .shuffle)
         Task {
@@ -3379,6 +3392,7 @@ struct ContentView: View {
     private func setShuffleScope(_ scope: ShuffleScope) {
         guard shuffleScope != scope else { return }
         shuffleScope = scope
+        if isShuffle { normalShuffleNeedsReset = true }
         queue.removeAll { $0.source == .shuffle || $0.source == .unplayedShuffle }
         if activeRefillCondition == nil && !isPlaylistPlayback {
             fillActiveShuffleQueue()
