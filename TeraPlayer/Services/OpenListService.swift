@@ -9,9 +9,20 @@
 
 import Foundation
 
+// 大きな音楽ファイルの取得・送信に備え、標準より長い通信時間を設定する。
+enum OpenListNetworkSession {
+    static let shared: URLSession = {
+        let configuration = URLSessionConfiguration.default
+        configuration.timeoutIntervalForRequest = 300
+        configuration.timeoutIntervalForResource = 3600
+        configuration.waitsForConnectivity = true
+        return URLSession(configuration: configuration)
+    }()
+}
+
 final class OpenListService {
 
-    private let baseURL = "http://192.168.0.10:5244"
+    private let baseURL = "http://192.168.0.8:5244"
 
     private func authorizationToken() throws -> String {
         guard let token = try OpenListTokenStore.load(), !token.isEmpty else {
@@ -87,7 +98,7 @@ final class OpenListService {
             withJSONObject: body
         )
 
-        let (data, response) = try await URLSession.shared.data(
+        let (data, response) = try await OpenListNetworkSession.shared.data(
             for: request
         )
 
@@ -139,7 +150,7 @@ final class OpenListService {
             withJSONObject: body
         )
 
-        let (data, response) = try await URLSession.shared.data(
+        let (data, response) = try await OpenListNetworkSession.shared.data(
             for: request
         )
 
