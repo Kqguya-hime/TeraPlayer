@@ -2862,8 +2862,10 @@ struct ContentView: View {
     // クラウド上のMP3からID3タグを読み込む
     private func loadCloudMP3Metadata(path: String) async throws -> MusicTagMetadata {
         let remoteURL = try await service.getMusicURL(path: path)
-        let (downloadURL, response) = try await URLSession.shared.download(
-            from: remoteURL
+        var downloadRequest = URLRequest(url: remoteURL)
+        downloadRequest.timeoutInterval = 300
+        let (downloadURL, response) = try await OpenListNetworkSession.shared.download(
+            for: downloadRequest
         )
 
         guard let httpResponse = response as? HTTPURLResponse,
@@ -2895,8 +2897,10 @@ struct ContentView: View {
         album: String
     ) async throws {
         let remoteURL = try await service.getMusicURL(path: path)
-        let (downloadURL, response) = try await URLSession.shared.download(
-            from: remoteURL
+        var downloadRequest = URLRequest(url: remoteURL)
+        downloadRequest.timeoutInterval = 300
+        let (downloadURL, response) = try await OpenListNetworkSession.shared.download(
+            for: downloadRequest
         )
 
         guard let httpResponse = response as? HTTPURLResponse,
@@ -2937,7 +2941,7 @@ struct ContentView: View {
             remotePath: path
         )
 
-        // SwiftDataの表示情報を更新し、古いオフライン音源は破棄する。
+        // クラウド更新成功後、SwiftDataとオフライン保存ファイルを同期する。
         let descriptor = FetchDescriptor<MusicTrack>(
             predicate: #Predicate { $0.path == path }
         )
@@ -2948,11 +2952,25 @@ struct ContentView: View {
             track.album = album.isEmpty ? nil : album
             track.fileSize = updatedFileSize
 
+            // オフライン保存済みなら、同じ保存名のまま編集後MP3へ置き換える。
+            // これにより再生回数・お気に入り・履歴・pathを維持したまま、
+            // オフライン再生も引き続き利用できる。
             if let localFileName = track.localFileName {
-                try? OfflineMusicStore().deleteFile(localFileName)
+                do {
+                    try OfflineMusicStore().replaceDownloadedFile(
+                        from: editedURL,
+                        localFileName: localFileName
+                    )
+                    track.isDownloaded = true
+                } catch {
+                    // クラウド側は更新済み。古いローカル音源を誤再生しないよう
+                    // ダウンロード状態を解除し、次回の保存で再取得できるようにする。
+                    print("オフライン音源の更新に失敗: \\(error.localizedDescription)")
+                    try? OfflineMusicStore().deleteFile(localFileName)
+                    track.isDownloaded = false
+                    track.localFileName = nil
+                }
             }
-            track.isDownloaded = false
-            track.localFileName = nil
 
             try modelContext.save()
         }
