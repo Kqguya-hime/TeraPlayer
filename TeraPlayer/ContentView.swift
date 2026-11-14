@@ -345,7 +345,7 @@ struct ContentView: View {
     }
 
     private enum ShuffleScope: String, CaseIterable, Identifiable {
-        case trackFolder = "現在のフォルダ"
+        case trackFolder = "曲のフォルダ"
         case allLibrary = "全ライブラリ"
         var id: String { rawValue }
     }
@@ -1405,7 +1405,7 @@ struct ContentView: View {
 
                             HStack {
                                 Menu {
-                                    Button("現在のフォルダ") { setShuffleScope(.trackFolder) }
+                                    Button("再生中の曲のフォルダ") { setShuffleScope(.trackFolder) }
                                     Button("全ライブラリ") { setShuffleScope(.allLibrary) }
                                 } label: {
                                     Label(shuffleScopeTitle, systemImage: "folder")
@@ -3899,7 +3899,7 @@ struct ContentView: View {
 
                 // 再生範囲
                 Menu {
-                    Button("現在のフォルダ") { setShuffleScope(.trackFolder) }
+                    Button("再生中の曲のフォルダ") { setShuffleScope(.trackFolder) }
                     Button("全ライブラリ") { setShuffleScope(.allLibrary) }
                 } label: {
                     Image(systemName: "folder")
