@@ -24,7 +24,7 @@ final class OpenListUploadService {
         }
     }
 
-    private let baseURL = "http://192.168.0.10:5244"
+    private let baseURL = "http://192.168.0.8:5244"
     private let openListService = OpenListService()
 
     // 専用フォルダがなければ作成する。
@@ -49,6 +49,7 @@ final class OpenListUploadService {
         }
 
         var request = URLRequest(url: url)
+        request.timeoutInterval = 300
         request.httpMethod = "POST"
         request.setValue(token, forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -56,7 +57,7 @@ final class OpenListUploadService {
             withJSONObject: ["path": Self.uploadDirectory]
         )
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await OpenListNetworkSession.shared.data(for: request)
 
         guard let httpResponse = response as? HTTPURLResponse else {
             throw UploadError.invalidResponse
@@ -140,6 +141,7 @@ final class OpenListUploadService {
         let fileSize = (attributes[.size] as? NSNumber)?.int64Value ?? 0
 
         var request = URLRequest(url: url)
+        request.timeoutInterval = 300
         request.httpMethod = "PUT"
         request.setValue(token, forHTTPHeaderField: "Authorization")
         request.setValue(encodedPath, forHTTPHeaderField: "File-Path")
@@ -148,7 +150,7 @@ final class OpenListUploadService {
         request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
         request.setValue(String(fileSize), forHTTPHeaderField: "Content-Length")
 
-        let (data, response) = try await URLSession.shared.upload(
+        let (data, response) = try await OpenListNetworkSession.shared.upload(
             for: request,
             fromFile: fileURL
         )
