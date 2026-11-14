@@ -49,7 +49,7 @@ final class OpenListUploadService {
         }
 
         var request = URLRequest(url: url)
-        request.timeoutInterval = 300
+        request.timeoutInterval = 1800
         request.httpMethod = "POST"
         request.setValue(token, forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -180,4 +180,18 @@ final class OpenListUploadService {
 private struct OpenListUploadResponse: Decodable {
     let code: Int
     let message: String
+}
+
+
+// MP3のような大容量ファイル転送に使う共通セッション。
+// request timeoutは通信中に応答が途切れた場合の待機時間、
+// resource timeoutは1回の転送全体に許容する最大時間。
+final class OpenListNetworkSession {
+    static let shared: URLSession = {
+        let configuration = URLSessionConfiguration.default
+        configuration.timeoutIntervalForRequest = 1800
+        configuration.timeoutIntervalForResource = 3600
+        configuration.waitsForConnectivity = true
+        return URLSession(configuration: configuration)
+    }()
 }
