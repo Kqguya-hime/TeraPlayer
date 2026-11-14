@@ -2965,7 +2965,7 @@ struct ContentView: View {
                 } catch {
                     // クラウド側は更新済み。古いローカル音源を誤再生しないよう
                     // ダウンロード状態を解除し、次回の保存で再取得できるようにする。
-                    print("オフライン音源の更新に失敗: \\(error.localizedDescription)")
+                    print("オフライン音源の更新に失敗: \(error.localizedDescription)")
                     try? OfflineMusicStore().deleteFile(localFileName)
                     track.isDownloaded = false
                     track.localFileName = nil
