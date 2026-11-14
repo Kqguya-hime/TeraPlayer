@@ -1405,10 +1405,31 @@ struct ContentView: View {
 
                             HStack {
                                 Menu {
-                                    Button("再生中の曲のフォルダ") { setShuffleScope(.trackFolder) }
-                                    Button("全ライブラリ") { setShuffleScope(.allLibrary) }
+                                    Button {
+                                        setShuffleScope(.trackFolder)
+                                    } label: {
+                                        if shuffleScope == .trackFolder {
+                                            Label("再生中の曲のフォルダ", systemImage: "checkmark")
+                                        } else {
+                                            Text("再生中の曲のフォルダ")
+                                        }
+                                    }
+                                    Button {
+                                        setShuffleScope(.allLibrary)
+                                    } label: {
+                                        if shuffleScope == .allLibrary {
+                                            Label("全ライブラリ", systemImage: "checkmark")
+                                        } else {
+                                            Text("全ライブラリ")
+                                        }
+                                    }
                                 } label: {
                                     Label(shuffleScopeTitle, systemImage: "folder")
+                                        .fontWeight(.semibold)
+                                        .foregroundStyle(shuffleScopeColor)
+                                        .padding(.horizontal, 9)
+                                        .padding(.vertical, 5)
+                                        .background(shuffleScopeColor.opacity(0.14), in: Capsule())
                                 }
 
                                 Menu {
@@ -3388,15 +3409,16 @@ struct ContentView: View {
         shuffleScope.rawValue
     }
 
-    // 再生範囲を切り替える
+    private var shuffleScopeColor: Color {
+        shuffleScope == .allLibrary ? .purple : .blue
+    }
+
+    // 再生範囲を切り替える。すでにキューに入っている曲は維持し、
+    // 次回以降の自動補充から新しい範囲を適用する。
     private func setShuffleScope(_ scope: ShuffleScope) {
         guard shuffleScope != scope else { return }
         shuffleScope = scope
         if isShuffle { normalShuffleNeedsReset = true }
-        queue.removeAll { $0.source == .shuffle || $0.source == .unplayedShuffle }
-        if activeRefillCondition == nil && !isPlaylistPlayback {
-            fillActiveShuffleQueue()
-        }
     }
 
     // 選択中のシャッフル方式
@@ -3899,10 +3921,29 @@ struct ContentView: View {
 
                 // 再生範囲
                 Menu {
-                    Button("再生中の曲のフォルダ") { setShuffleScope(.trackFolder) }
-                    Button("全ライブラリ") { setShuffleScope(.allLibrary) }
+                    Button {
+                        setShuffleScope(.trackFolder)
+                    } label: {
+                        if shuffleScope == .trackFolder {
+                            Label("再生中の曲のフォルダ", systemImage: "checkmark")
+                        } else {
+                            Text("再生中の曲のフォルダ")
+                        }
+                    }
+                    Button {
+                        setShuffleScope(.allLibrary)
+                    } label: {
+                        if shuffleScope == .allLibrary {
+                            Label("全ライブラリ", systemImage: "checkmark")
+                        } else {
+                            Text("全ライブラリ")
+                        }
+                    }
                 } label: {
                     Image(systemName: "folder")
+                        .foregroundStyle(shuffleScopeColor)
+                        .padding(6)
+                        .background(shuffleScopeColor.opacity(0.14), in: Circle())
                 }
 
                 // シャッフル方式
