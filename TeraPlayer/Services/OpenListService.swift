@@ -13,7 +13,7 @@ import Foundation
 enum OpenListNetworkSession {
     static let shared: URLSession = {
         let configuration = URLSessionConfiguration.default
-        configuration.timeoutIntervalForRequest = 300
+        configuration.timeoutIntervalForRequest = 1800
         configuration.timeoutIntervalForResource = 3600
         configuration.waitsForConnectivity = true
         return URLSession(configuration: configuration)
