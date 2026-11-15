@@ -191,10 +191,23 @@ final class OpenListService {
 
         // 通信切断などで「サーバー側は移動済み、端末側は未確定」になった場合に備え、
         // 移動前に送信元・移動先を確認して再試行を安全にする。
-        let sourceFiles = try await getFiles(path: sourceDirectory)
         let destinationFiles = try await getFiles(path: destinationDirectory)
-        let sourceExists = sourceFiles.contains { !$0.is_dir && $0.name == fileName }
-        let destinationExists = destinationFiles.contains { !$0.is_dir && $0.name == fileName }
+        let destinationExists = destinationFiles.contains {
+            !$0.is_dir && $0.name == fileName
+        }
+
+        let sourceFiles: [OpenListFile]
+        do {
+            sourceFiles = try await getFiles(path: sourceDirectory)
+        } catch {
+            // 送信元フォルダーが空になって消えていても、移動先に対象があれば前回成功と判断する。
+            if destinationExists { return }
+            throw error
+        }
+
+        let sourceExists = sourceFiles.contains {
+            !$0.is_dir && $0.name == fileName
+        }
 
         if !sourceExists && destinationExists {
             // 前回の要求でクラウド側だけ移動が完了していた。
