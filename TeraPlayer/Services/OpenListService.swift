@@ -76,7 +76,7 @@ final class OpenListService {
 
     // MARK: - ファイル一覧取得
 
-    func getFiles(path: String) async throws -> [OpenListFile] {
+    func getFiles(path: String, refresh: Bool = false) async throws -> [OpenListFile] {
 
         let token = try authorizationToken()
         let url = URL(string: "\(baseURL)/api/fs/list")!
@@ -92,7 +92,7 @@ final class OpenListService {
             "password": "",
             "page": 1,
             "per_page": 0,
-            "refresh": false
+            "refresh": refresh
         ]
 
         request.httpBody = try JSONSerialization.data(
@@ -191,14 +191,14 @@ final class OpenListService {
 
         // 通信切断などで「サーバー側は移動済み、端末側は未確定」になった場合に備え、
         // 移動前に送信元・移動先を確認して再試行を安全にする。
-        let destinationFiles = try await getFiles(path: destinationDirectory)
+        let destinationFiles = try await getFiles(path: destinationDirectory, refresh: true)
         let destinationExists = destinationFiles.contains {
             !$0.is_dir && $0.name == fileName
         }
 
         let sourceFiles: [OpenListFile]
         do {
-            sourceFiles = try await getFiles(path: sourceDirectory)
+            sourceFiles = try await getFiles(path: sourceDirectory, refresh: true)
         } catch {
             // 送信元フォルダーが空になって消えていても、移動先に対象があれば前回成功と判断する。
             if destinationExists { return }
