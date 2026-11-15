@@ -470,18 +470,20 @@ struct ContentView: View {
                         .buttonStyle(.bordered)
                     }
 
-                    Button {
-                        isSelectingTrackForMove.toggle()
-                        isSelectingMP3ForEditing = false
-                        if !isSelectingTrackForMove { selectedTrackForMove = nil }
-                    } label: {
-                        Label(
-                            isSelectingTrackForMove ? "移動をキャンセル" : "移動",
-                            systemImage: isSelectingTrackForMove ? "xmark" : "folder"
-                        )
+                    if libraryBrowseMode == "曲" {
+                        Button {
+                            isSelectingTrackForMove.toggle()
+                            isSelectingMP3ForEditing = false
+                            if !isSelectingTrackForMove { selectedTrackForMove = nil }
+                        } label: {
+                            Label(
+                                isSelectingTrackForMove ? "移動をキャンセル" : "移動",
+                                systemImage: isSelectingTrackForMove ? "xmark" : "folder"
+                            )
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(isSelectingTrackForMove ? .orange : .blue)
                     }
-                    .buttonStyle(.bordered)
-                    .tint(isSelectingTrackForMove ? .orange : .blue)
 
                     if !isOfflineMode {
                         Button {
@@ -614,6 +616,7 @@ struct ContentView: View {
                                 Task { await openFolder(file) }
                             } else if isSelectingTrackForMove {
                                 if let track = musicTracks.first(where: { $0.path == makePath(for: file) }) {
+                                    errorMessage = ""
                                     selectedTrackForMove = track
                                     movePickerPath = currentPath
                                     isMoveDestinationPickerPresented = true
@@ -693,6 +696,18 @@ struct ContentView: View {
     private var moveDestinationPicker: some View {
         NavigationStack {
             List {
+                if !errorMessage.isEmpty {
+                    Section {
+                        Text(errorMessage)
+                            .foregroundStyle(.red)
+                    }
+                }
+
+                Section("現在のフォルダー") {
+                    Text(movePickerPath == "/terabox" ? "TeraBox" : (movePickerPath as NSString).lastPathComponent)
+                        .foregroundStyle(.secondary)
+                }
+
                 Section("移動先") {
                     Button {
                         Task { await moveSelectedTrack(to: movePickerPath) }
@@ -3040,7 +3055,7 @@ struct ContentView: View {
     // ダウンロード済み音源を、現在の表示パスに対応するローカルフォルダーへ配置する。
     private func organizeOfflineFilesIfNeeded() {
         let store = OfflineMusicStore()
-        var didChange = false
+        var movedFiles: [(track: MusicTrack, oldPath: String, newPath: String)] = []
 
         for track in musicTracks {
             guard track.path.hasPrefix("/terabox/"),
@@ -3060,18 +3075,34 @@ struct ContentView: View {
             guard normalizedCurrentDirectory != relativeDirectory else { continue }
 
             do {
-                track.localFileName = try store.moveFile(
+                let newLocalFileName = try store.moveFile(
                     localFileName: localFileName,
                     toRelativeDirectory: relativeDirectory
                 )
-                didChange = true
+                track.localFileName = newLocalFileName
+                movedFiles.append((track, localFileName, newLocalFileName))
             } catch {
                 print("オフライン音源のフォルダー整理に失敗: \(track.fileName) / \(error.localizedDescription)")
             }
         }
 
-        if didChange {
+        guard !movedFiles.isEmpty else { return }
+
+        do {
+            try modelContext.save()
+        } catch {
+            // DB保存に失敗した場合は、ファイルも元の階層へ戻して参照切れを防ぐ。
+            for moved in movedFiles {
+                moved.track.localFileName = moved.oldPath
+                let oldDirectory = (moved.oldPath as NSString).deletingLastPathComponent
+                let normalizedOldDirectory = oldDirectory == "." ? "" : oldDirectory
+                _ = try? store.moveFile(
+                    localFileName: moved.newPath,
+                    toRelativeDirectory: normalizedOldDirectory
+                )
+            }
             try? modelContext.save()
+            print("オフライン階層情報の保存に失敗: \(error.localizedDescription)")
         }
     }
 
