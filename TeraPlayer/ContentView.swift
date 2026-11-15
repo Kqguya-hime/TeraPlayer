@@ -484,7 +484,7 @@ struct ContentView: View {
                         }
                         .buttonStyle(.bordered)
                         .tint(isSelectingTrackForMove ? .orange : .blue)
-                        .disabled(isProcessingFileMoves)
+                        .disabled(isProcessingFileMoves || isScanningLibrary)
                     }
 
                     if !isOfflineMode {
@@ -786,8 +786,8 @@ struct ContentView: View {
     }
 
     private func moveSelectedTrack(to destinationDirectory: String) async {
-        guard !isProcessingFileMoves else {
-            errorMessage = "別のファイル移動を処理中です。完了後に再試行してください。"
+        guard !isProcessingFileMoves, !isScanningLibrary else {
+            errorMessage = "ライブラリ同期中はファイルを移動できません。完了後に再試行してください。"
             return
         }
         guard let track = selectedTrackForMove else { return }
