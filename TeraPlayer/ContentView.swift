@@ -300,6 +300,7 @@ struct ContentView: View {
     @State private var selectedTrackForMove: MusicTrack? = nil
     @State private var isMoveDestinationPickerPresented = false
     @State private var movePickerPath = "/terabox"
+    @State private var isProcessingFileMoves = false
 
     // プレイヤー
     @State private var player = AVPlayer()
@@ -729,6 +730,7 @@ struct ContentView: View {
 
                     ForEach(movePickerChildFolders, id: \.self) { folderPath in
                         Button {
+                            errorMessage = ""
                             movePickerPath = folderPath
                         } label: {
                             Label(
@@ -853,9 +855,14 @@ struct ContentView: View {
 
     // 保留中の移動をクラウドへ反映し、成功したものだけパス参照を一括更新する。
     private func processPendingRemoteMoves() async throws {
-        let pendingTracks = musicTracks.filter { $0.pendingRemotePath != nil }
+        guard !isProcessingFileMoves else {
+            throw OpenListService.OpenListError.apiError(409, "別のファイル移動を処理中です")
+        }
 
-        for track in pendingTracks {
+        isProcessingFileMoves = true
+        defer { isProcessingFileMoves = false }
+
+        while let track = musicTracks.first(where: { $0.pendingRemotePath != nil }) {
             guard let destinationPath = track.pendingRemotePath else { continue }
 
             let oldPath = track.path
