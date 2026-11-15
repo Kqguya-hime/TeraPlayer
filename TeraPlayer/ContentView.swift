@@ -2833,7 +2833,7 @@ struct ContentView: View {
                 )
             } else {
                 let name = String(firstComponent)
-                let folderPath = prefix.dropLast() + "/" + name
+                let folderPath = String(prefix.dropLast()) + "/" + name
 
                 folders[folderPath] = OpenListFile(
                     name: name,
