@@ -891,7 +891,7 @@ struct ContentView: View {
             )
 
             // 移動後の更新日時・署名を取得し、次回スキャンで音源を誤って再ダウンロードしないようにする。
-            let destinationFiles = try await service.getFiles(path: destinationDirectory)
+            let destinationFiles = try await service.getFiles(path: destinationDirectory, refresh: true)
             guard let movedFile = destinationFiles.first(where: {
                 !$0.is_dir && $0.name == newFileName
             }) else {
