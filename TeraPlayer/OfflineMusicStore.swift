@@ -38,9 +38,62 @@ final class OfflineMusicStore {
     // MARK: - 保存先URL取得
     
     func localURL(for fileName: String) throws -> URL {
-        
-        return try directoryURL()
-            .appendingPathComponent(fileName)
+
+        let components = fileName.split(
+            separator: "/",
+            omittingEmptySubsequences: true
+        )
+
+        guard !components.isEmpty,
+              !components.contains(".."),
+              !components.contains(".") else {
+            throw CocoaError(.fileReadInvalidFileName)
+        }
+
+        var url = try directoryURL()
+        for component in components {
+            url.appendPathComponent(String(component))
+        }
+
+        // 相対パスで指定された保存先の親フォルダーを作成する。
+        try FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+
+        return url
+    }
+
+    // 保存済み音源を、クラウド上のフォルダー構造に合わせたローカル階層へ移動する。
+    // 戻り値は新しいlocalFileName（OfflineMusicからの相対パス）。
+    func moveFile(
+        localFileName: String,
+        toRelativeDirectory: String
+    ) throws -> String {
+
+        let fileManager = FileManager.default
+        let sourceURL = try localURL(for: localFileName)
+
+        guard fileManager.fileExists(atPath: sourceURL.path) else {
+            throw CocoaError(.fileNoSuchFile)
+        }
+
+        let fileName = sourceURL.lastPathComponent
+        let destinationRelativePath = toRelativeDirectory.isEmpty
+            ? fileName
+            : toRelativeDirectory + "/" + fileName
+        let destinationURL = try localURL(for: destinationRelativePath)
+
+        if sourceURL.standardizedFileURL == destinationURL.standardizedFileURL {
+            return localFileName
+        }
+
+        guard !fileManager.fileExists(atPath: destinationURL.path) else {
+            throw CocoaError(.fileWriteFileExists)
+        }
+
+        try fileManager.moveItem(at: sourceURL, to: destinationURL)
+        return destinationRelativePath
     }
     
     // MARK: - ファイル存在確認
@@ -95,8 +148,8 @@ final class OfflineMusicStore {
         localFileName: String
     ) throws {
         let fileManager = FileManager.default
-        let directory = try directoryURL()
-        let destinationURL = directory.appendingPathComponent(localFileName)
+        let destinationURL = try localURL(for: localFileName)
+        let directory = destinationURL.deletingLastPathComponent()
         let replacementURL = directory
             .appendingPathComponent(UUID().uuidString)
             .appendingPathExtension(destinationURL.pathExtension)
