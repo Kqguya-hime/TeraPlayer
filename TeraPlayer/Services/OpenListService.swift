@@ -76,7 +76,7 @@ final class OpenListService {
 
     // MARK: - ファイル一覧取得
 
-    func getFiles(path: String, refresh: Bool = false) async throws -> [OpenListFile] {
+    func getFiles(path: String) async throws -> [OpenListFile] {
 
         let token = try authorizationToken()
         let url = URL(string: "\(baseURL)/api/fs/list")!
@@ -92,7 +92,7 @@ final class OpenListService {
             "password": "",
             "page": 1,
             "per_page": 0,
-            "refresh": refresh
+            "refresh": false
         ]
 
         request.httpBody = try JSONSerialization.data(
@@ -174,73 +174,6 @@ final class OpenListService {
         }
 
         return musicURL
-    }
-
-    // MARK: - ファイル移動
-
-    // OpenList上でファイルを別フォルダーへ移動する。
-    func moveFile(from sourcePath: String, to destinationDirectory: String) async throws {
-        let token = try authorizationToken()
-        let sourceDirectory = (sourcePath as NSString).deletingLastPathComponent
-        let fileName = (sourcePath as NSString).lastPathComponent
-
-        guard !fileName.isEmpty,
-              sourceDirectory != destinationDirectory else {
-            return
-        }
-
-        // 通信切断などで「サーバー側は移動済み、端末側は未確定」になった場合に備え、
-        // 移動前に送信元・移動先を確認して再試行を安全にする。
-        let destinationFiles = try await getFiles(path: destinationDirectory, refresh: true)
-        let destinationExists = destinationFiles.contains {
-            !$0.is_dir && $0.name == fileName
-        }
-
-        let sourceFiles: [OpenListFile]
-        do {
-            sourceFiles = try await getFiles(path: sourceDirectory, refresh: true)
-        } catch {
-            // 送信元フォルダーが空になって消えていても、移動先に対象があれば前回成功と判断する。
-            if destinationExists { return }
-            throw error
-        }
-
-        let sourceExists = sourceFiles.contains {
-            !$0.is_dir && $0.name == fileName
-        }
-
-        if !sourceExists && destinationExists {
-            // 前回の要求でクラウド側だけ移動が完了していた。
-            return
-        }
-
-        guard sourceExists else {
-            throw OpenListError.apiError(404, "移動元ファイルが見つかりません")
-        }
-
-        guard !destinationExists else {
-            throw OpenListError.apiError(409, "移動先に同名ファイルが存在します")
-        }
-
-        let url = URL(string: "\(baseURL)/api/fs/move")!
-        var request = URLRequest(url: url)
-        request.timeoutInterval = 1800
-        request.httpMethod = "POST"
-        request.setValue(token, forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONSerialization.data(withJSONObject: [
-            "src_dir": sourceDirectory,
-            "dst_dir": destinationDirectory,
-            "names": [fileName]
-        ])
-
-        let (data, response) = try await OpenListNetworkSession.shared.data(for: request)
-        try checkHTTPResponse(response)
-
-        let result = try JSONDecoder().decode(OpenListResponse.self, from: data)
-        guard result.code == 200 else {
-            throw OpenListError.apiError(result.code, result.message)
-        }
     }
 
     // MARK: - 全フォルダの音楽ファイルを取得
