@@ -411,6 +411,9 @@ struct ContentView: View {
             configureAudioSession()
             configureNowPlaying()
             await loadFiles()
+            if networkMonitor.isWiFiConnected {
+                await scanLibrary()
+            }
         }
         .onReceive(
             NotificationCenter.default.publisher(
