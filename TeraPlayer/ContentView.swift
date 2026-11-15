@@ -3070,8 +3070,8 @@ struct ContentView: View {
 
         } catch {
             guard activeLibraryRequestID == requestID else { return }
-            activateOfflineMode(errorMessage: "OpenList接続エラー：\\(error.localizedDescription)")
-            print("OpenList接続エラー: \\(String(reflecting: error))")
+            activateOfflineMode(errorMessage: "OpenList接続エラー：\(error.localizedDescription)")
+            print("OpenList接続エラー: \(String(reflecting: error))")
         }
     }
 
@@ -3082,7 +3082,7 @@ struct ContentView: View {
         isLoading = false
         isOfflineMode = true
         files = makeOfflineFiles()
-        libraryScanStatus = "オフラインモード：保存済み \\(offlineSavedTrackCount) 曲"
+        libraryScanStatus = "オフラインモード：保存済み \(offlineSavedTrackCount) 曲"
         self.errorMessage = errorMessage ?? ""
     }
 
