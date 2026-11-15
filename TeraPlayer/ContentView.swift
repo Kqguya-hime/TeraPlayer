@@ -455,7 +455,7 @@ struct ContentView: View {
         NavigationStack {
             List {
                 HStack(spacing: 8) {
-                    if currentPath != "/terabox" && !isOfflineMode {
+                    if currentPath != "/terabox" {
                         Button {
                             Task { await goToParentFolder() }
                         } label: {
@@ -2769,40 +2769,92 @@ struct ContentView: View {
     // MARK: - 基本処理
 
     private var folderName: String {
-        if isOfflineMode {
-            return "オフライン保存"
+        if currentPath == "/terabox" {
+            return isOfflineMode ? "オフライン保存" : "TeraBox"
         }
 
-        return currentPath == "/terabox"
-            ? "TeraBox"
-            : currentPath.components(separatedBy: "/").last ?? "TeraBox"
+        return currentPath.components(separatedBy: "/").last ?? "TeraBox"
     }
 
-    // 端末に実際に保存されている曲だけをオフライン一覧にする
-    private func makeOfflineFiles() -> [OpenListFile] {
+    // オフライン保存済みの楽曲数。現在開いている階層に関係なく全体を数える。
+    private var offlineSavedTrackCount: Int {
         let store = OfflineMusicStore()
 
-        return musicTracks
-            .filter { track in
-                track.path.hasPrefix("/terabox/")
-                    && track.isDownloaded
-                    && track.localFileName != nil
-                    && (try? store.fileExists(track.localFileName!)) == true
+        return musicTracks.filter { track in
+            track.path.hasPrefix("/terabox/")
+                && track.isDownloaded
+                && track.localFileName != nil
+                && (try? store.fileExists(track.localFileName!)) == true
+        }.count
+    }
+
+    // 保存済み楽曲のクラウドパスからフォルダー階層を再構成する。
+    // MusicTrack.pathには元のクラウド上のフルパスが保存されているため、
+    // フォルダー構造専用のデータを別途保存する必要はない。
+    private func makeOfflineFiles() -> [OpenListFile] {
+        let store = OfflineMusicStore()
+        let prefix = currentPath == "/terabox"
+            ? "/terabox/"
+            : currentPath + "/"
+
+        var folders: [String: OpenListFile] = [:]
+        var directFiles: [OpenListFile] = []
+
+        for track in musicTracks {
+            guard track.path.hasPrefix("/terabox/"),
+                  track.isDownloaded,
+                  let localFileName = track.localFileName,
+                  (try? store.fileExists(localFileName)) == true,
+                  track.path.hasPrefix(prefix) else {
+                continue
             }
-            .map { track in
-                OpenListFile(
-                    name: track.fileName,
-                    size: track.fileSize,
-                    is_dir: false,
-                    modified: track.cloudModified,
+
+            let relativePath = String(track.path.dropFirst(prefix.count))
+            let components = relativePath.split(
+                separator: "/",
+                omittingEmptySubsequences: true
+            )
+
+            guard let firstComponent = components.first else {
+                continue
+            }
+
+            if components.count == 1 {
+                directFiles.append(
+                    OpenListFile(
+                        name: track.fileName,
+                        size: track.fileSize,
+                        is_dir: false,
+                        modified: track.cloudModified,
+                        created: nil,
+                        sign: track.cloudSign,
+                        path: track.path
+                    )
+                )
+            } else {
+                let name = String(firstComponent)
+                let folderPath = prefix.dropLast() + "/" + name
+
+                folders[folderPath] = OpenListFile(
+                    name: name,
+                    size: 0,
+                    is_dir: true,
+                    modified: nil,
                     created: nil,
-                    sign: track.cloudSign,
-                    path: track.path
+                    sign: nil,
+                    path: folderPath
                 )
             }
-            .sorted {
-                $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
-            }
+        }
+
+        let sortedFolders = folders.values.sorted {
+            $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+        }
+        let sortedFiles = directFiles.sorted {
+            $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+        }
+
+        return sortedFolders + sortedFiles
     }
 
     // 音楽ファイルか判定
@@ -2988,7 +3040,7 @@ struct ContentView: View {
         } catch {
             isOfflineMode = true
             files = makeOfflineFiles()
-            libraryScanStatus = "オフラインモード：保存済み \(files.count) 曲"
+            libraryScanStatus = "オフラインモード：保存済み \(offlineSavedTrackCount) 曲"
             errorMessage = "OpenList接続エラー：\(error.localizedDescription)"
             print("OpenList接続エラー: \(String(reflecting: error))")
         }
@@ -3149,8 +3201,7 @@ struct ContentView: View {
     // 1つ上のフォルダへ移動
     private func goToParentFolder() async {
 
-        guard !isOfflineMode,
-              currentPath != "/terabox" else {
+        guard currentPath != "/terabox" else {
             return
         }
 
