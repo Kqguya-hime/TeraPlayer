@@ -411,7 +411,7 @@ struct ContentView: View {
             configureAudioSession()
             configureNowPlaying()
             await loadFiles()
-            if networkMonitor.isWiFiConnected {
+            if networkMonitor.isWiFiConnected && !isOfflineMode {
                 await scanLibrary()
             }
         }
@@ -432,7 +432,7 @@ struct ContentView: View {
                 print("Wi-Fi接続を検知：自動同期を開始")
                 Task {
                     await loadFiles()
-                    await scanLibrary()
+                    if !isOfflineMode { await scanLibrary() }
                 }
                 retryInterruptedDownloadsIfNeeded()
             }
@@ -453,7 +453,7 @@ struct ContentView: View {
                 print("アプリ復帰：Wi-Fi接続中のため自動同期")
                 Task {
                     await loadFiles()
-                    await scanLibrary()
+                    if !isOfflineMode { await scanLibrary() }
                 }
             }
         }
