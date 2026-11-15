@@ -295,6 +295,12 @@ struct ContentView: View {
     @State private var selectedMP3ForEditing: OpenListFile? = nil
     @State private var isSelectingMP3ForEditing = false
 
+    // 曲ファイルの移動
+    @State private var isSelectingTrackForMove = false
+    @State private var selectedTrackForMove: MusicTrack? = nil
+    @State private var isMoveDestinationPickerPresented = false
+    @State private var movePickerPath = "/terabox"
+
     // プレイヤー
     @State private var player = AVPlayer()
     @State private var isPlaying = false
@@ -455,7 +461,7 @@ struct ContentView: View {
         NavigationStack {
             List {
                 HStack(spacing: 8) {
-                    if currentPath != "/terabox" && !isOfflineMode {
+                    if currentPath != "/terabox" {
                         Button {
                             Task { await goToParentFolder() }
                         } label: {
@@ -464,9 +470,23 @@ struct ContentView: View {
                         .buttonStyle(.bordered)
                     }
 
+                    Button {
+                        isSelectingTrackForMove.toggle()
+                        isSelectingMP3ForEditing = false
+                        if !isSelectingTrackForMove { selectedTrackForMove = nil }
+                    } label: {
+                        Label(
+                            isSelectingTrackForMove ? "移動をキャンセル" : "移動",
+                            systemImage: isSelectingTrackForMove ? "xmark" : "folder"
+                        )
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(isSelectingTrackForMove ? .orange : .blue)
+
                     if !isOfflineMode {
                         Button {
                             isSelectingMP3ForEditing.toggle()
+                            isSelectingTrackForMove = false
                         } label: {
                             Label(
                                 isSelectingMP3ForEditing ? "選択をキャンセル" : "楽曲情報編集",
@@ -592,6 +612,15 @@ struct ContentView: View {
                         Button {
                             if file.is_dir {
                                 Task { await openFolder(file) }
+                            } else if isSelectingTrackForMove {
+                                if let track = musicTracks.first(where: { $0.path == makePath(for: file) }) {
+                                    selectedTrackForMove = track
+                                    movePickerPath = currentPath
+                                    isMoveDestinationPickerPresented = true
+                                    isSelectingTrackForMove = false
+                                } else {
+                                    errorMessage = "移動対象の楽曲情報が見つかりません。"
+                                }
                             } else if isSelectingMP3ForEditing {
                                 if file.name.lowercased().hasSuffix(".mp3") && !isOfflineMode {
                                     selectedMP3ForEditing = file
@@ -604,7 +633,7 @@ struct ContentView: View {
                             }
                         } label: {
                             HStack {
-                                Image(systemName: file.is_dir ? "folder.fill" : (isSelectingMP3ForEditing ? "pencil" : "music.note"))
+                                Image(systemName: file.is_dir ? "folder.fill" : (isSelectingTrackForMove ? "folder" : (isSelectingMP3ForEditing ? "pencil" : "music.note")))
                                 VStack(alignment: .leading) {
                                     Text(file.name)
                                         .foregroundStyle(.primary)
@@ -655,6 +684,235 @@ struct ContentView: View {
                     )
                 }
             )
+        }
+        .sheet(isPresented: $isMoveDestinationPickerPresented) {
+            moveDestinationPicker
+        }
+    }
+
+    private var moveDestinationPicker: some View {
+        NavigationStack {
+            List {
+                Section("移動先") {
+                    Button {
+                        Task { await moveSelectedTrack(to: movePickerPath) }
+                    } label: {
+                        Label("このフォルダーへ移動", systemImage: "folder.badge.arrow.down")
+                    }
+                    .disabled(
+                        selectedTrackForMove.map {
+                            (($0.displayPath as NSString).deletingLastPathComponent) == movePickerPath
+                        } ?? true
+                    )
+                }
+
+                Section("サブフォルダー") {
+                    if movePickerChildFolders.isEmpty {
+                        Text("選択できるサブフォルダーはありません")
+                            .foregroundStyle(.secondary)
+                    }
+
+                    ForEach(movePickerChildFolders, id: \.self) { folderPath in
+                        Button {
+                            movePickerPath = folderPath
+                        } label: {
+                            Label(
+                                (folderPath as NSString).lastPathComponent,
+                                systemImage: "folder"
+                            )
+                        }
+                    }
+                }
+            }
+            .navigationTitle("移動先を選択")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("キャンセル") {
+                        isMoveDestinationPickerPresented = false
+                        selectedTrackForMove = nil
+                    }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("上へ") {
+                        let parent = (movePickerPath as NSString).deletingLastPathComponent
+                        if parent == "/terabox" || parent.hasPrefix("/terabox/") {
+                            movePickerPath = parent
+                        }
+                    }
+                    .disabled(movePickerPath == "/terabox")
+                }
+            }
+        }
+    }
+
+    private var movePickerChildFolders: [String] {
+        let prefix = movePickerPath + "/"
+        var folders = Set<String>()
+
+        for track in musicTracks {
+            if isOfflineMode && !track.isDownloaded { continue }
+
+            let path = track.displayPath
+            guard path.hasPrefix(prefix) else { continue }
+
+            let remainder = String(path.dropFirst(prefix.count))
+            let components = remainder.split(separator: "/", omittingEmptySubsequences: true)
+            if components.count > 1, let first = components.first {
+                folders.insert(prefix + String(first))
+            }
+        }
+
+        return folders.sorted {
+            $0.localizedCaseInsensitiveCompare($1) == .orderedAscending
+        }
+    }
+
+    private func moveSelectedTrack(to destinationDirectory: String) async {
+        guard let track = selectedTrackForMove else { return }
+
+        let destinationPath = destinationDirectory + "/" + track.fileName
+        guard destinationPath != track.displayPath else {
+            errorMessage = "移動元と移動先が同じフォルダーです。"
+            return
+        }
+
+        guard !musicTracks.contains(where: {
+            $0.path != track.path && $0.displayPath == destinationPath
+        }) else {
+            errorMessage = "移動先に同名の楽曲が登録されています。上書きは行いません。"
+            return
+        }
+
+        track.pendingRemotePath = destinationPath
+
+        do {
+            try modelContext.save()
+        } catch {
+            track.pendingRemotePath = nil
+            errorMessage = "移動先の保存に失敗しました: \(error.localizedDescription)"
+            return
+        }
+
+        selectedTrackForMove = nil
+        isMoveDestinationPickerPresented = false
+
+        if isOfflineMode {
+            files = makeOfflineFiles()
+            libraryScanStatus = "移動予約を保存しました。Wi-Fi接続時にクラウドへ反映します。"
+            errorMessage = ""
+            return
+        }
+
+        do {
+            try await processPendingRemoteMoves()
+            await loadFiles()
+            libraryScanStatus = "ファイルを移動しました"
+            errorMessage = ""
+        } catch {
+            libraryScanStatus = "クラウドへの移動待ち"
+            errorMessage = "移動予約は保存されています。同期時に再試行します: \(error.localizedDescription)"
+        }
+    }
+
+    private func remappedQueueItem(
+        _ item: QueueItem,
+        oldPath: String,
+        newPath: String,
+        newFileName: String
+    ) -> QueueItem {
+        guard item.path == oldPath else { return item }
+
+        let file = OpenListFile(
+            name: newFileName,
+            size: item.file.size,
+            is_dir: false,
+            modified: item.file.modified,
+            created: item.file.created,
+            sign: item.file.sign,
+            path: newPath
+        )
+        return QueueItem(file: file, path: newPath, source: item.source)
+    }
+
+    // 保留中の移動をクラウドへ反映し、成功したものだけパス参照を一括更新する。
+    private func processPendingRemoteMoves() async throws {
+        let pendingTracks = musicTracks.filter { $0.pendingRemotePath != nil }
+
+        for track in pendingTracks {
+            guard let destinationPath = track.pendingRemotePath else { continue }
+
+            let oldPath = track.path
+            let destinationDirectory = (destinationPath as NSString).deletingLastPathComponent
+            let newFileName = (destinationPath as NSString).lastPathComponent
+
+            guard destinationPath.hasPrefix("/terabox/"),
+                  destinationDirectory == "/terabox" || destinationDirectory.hasPrefix("/terabox/"),
+                  !newFileName.isEmpty else {
+                throw OpenListService.OpenListError.apiError(400, "移動先パスが不正です")
+            }
+
+            guard !musicTracks.contains(where: {
+                $0.path == destinationPath && $0.path != oldPath
+            }) else {
+                throw OpenListService.OpenListError.apiError(409, "移動先に同じパスの楽曲があります")
+            }
+
+            try await service.moveFile(
+                from: oldPath,
+                to: destinationDirectory
+            )
+
+            track.path = destinationPath
+            track.fileName = newFileName
+            track.pendingRemotePath = nil
+
+            for history in playbackHistories where history.trackPath == oldPath {
+                history.trackPath = destinationPath
+            }
+
+            for playlist in playlists where playlist.trackPaths.contains(oldPath) {
+                playlist.trackPaths = playlist.trackPaths.map {
+                    $0 == oldPath ? destinationPath : $0
+                }
+                playlist.updatedAt = Date()
+            }
+
+            queue = queue.map {
+                remappedQueueItem($0, oldPath: oldPath, newPath: destinationPath, newFileName: newFileName)
+            }
+
+            if let playing = currentTrack, playing.path == oldPath {
+                currentTrack = remappedQueueItem(
+                    playing,
+                    oldPath: oldPath,
+                    newPath: destinationPath,
+                    newFileName: newFileName
+                )
+            }
+
+            playHistory = playHistory.map {
+                remappedQueueItem($0, oldPath: oldPath, newPath: destinationPath, newFileName: newFileName)
+            }
+
+            if let condition = activeRefillCondition,
+               condition.trackPaths.contains(oldPath) {
+                var updatedPaths = condition.trackPaths
+                updatedPaths.remove(oldPath)
+                updatedPaths.insert(destinationPath)
+                activeRefillCondition = QueueRefillCondition(
+                    targetName: condition.targetName,
+                    targetKind: condition.targetKind,
+                    trackPaths: updatedPaths,
+                    shuffle: condition.shuffle
+                )
+            }
+
+            if activePlaybackHistory?.trackPath == oldPath {
+                activePlaybackHistory?.trackPath = destinationPath
+            }
+
+            try modelContext.save()
         }
     }
 
@@ -2217,6 +2475,9 @@ struct ContentView: View {
 
         do {
 
+            // 保留中の移動を先に反映する。失敗した場合はスキャンによる誤削除を防ぐ。
+            try await processPendingRemoteMoves()
+
             // 1. クラウド上の全音楽ファイルを取得
             let scannedFiles = try await service.scanMusicFiles(
                 rootPath: "/terabox",
@@ -2458,6 +2719,7 @@ struct ContentView: View {
             print("削除: \(deletedCount)")
             print("メタデータ失敗: \(metadataFailures.count)")
             print("========================")
+            await loadFiles()
 
         } catch {
 
@@ -2769,10 +3031,6 @@ struct ContentView: View {
     // MARK: - 基本処理
 
     private var folderName: String {
-        if isOfflineMode {
-            return "オフライン保存"
-        }
-
         return currentPath == "/terabox"
             ? "TeraBox"
             : currentPath.components(separatedBy: "/").last ?? "TeraBox"
@@ -2781,28 +3039,60 @@ struct ContentView: View {
     // 端末に実際に保存されている曲だけをオフライン一覧にする
     private func makeOfflineFiles() -> [OpenListFile] {
         let store = OfflineMusicStore()
+        let prefix = currentPath + "/"
+        var folders: [String: OpenListFile] = [:]
+        var directFiles: [OpenListFile] = []
 
-        return musicTracks
-            .filter { track in
-                track.path.hasPrefix("/terabox/")
-                    && track.isDownloaded
-                    && track.localFileName != nil
-                    && (try? store.fileExists(track.localFileName!)) == true
+        for track in musicTracks {
+            guard track.path.hasPrefix("/terabox/"),
+                  track.isDownloaded,
+                  let localFileName = track.localFileName,
+                  (try? store.fileExists(localFileName)) == true else {
+                continue
             }
-            .map { track in
-                OpenListFile(
-                    name: track.fileName,
-                    size: track.fileSize,
-                    is_dir: false,
-                    modified: track.cloudModified,
+
+            let displayPath = track.displayPath
+            guard displayPath.hasPrefix(prefix) else { continue }
+
+            let relativePath = String(displayPath.dropFirst(prefix.count))
+            let components = relativePath.split(separator: "/", omittingEmptySubsequences: true)
+            guard let firstComponent = components.first else { continue }
+
+            if components.count == 1 {
+                directFiles.append(
+                    OpenListFile(
+                        name: track.fileName,
+                        size: track.fileSize,
+                        is_dir: false,
+                        modified: track.cloudModified,
+                        created: nil,
+                        sign: track.cloudSign,
+                        path: track.path,
+                        displayPath: displayPath
+                    )
+                )
+            } else {
+                let folderPath = prefix + String(firstComponent)
+                folders[folderPath] = OpenListFile(
+                    name: String(firstComponent),
+                    size: 0,
+                    is_dir: true,
+                    modified: nil,
                     created: nil,
-                    sign: track.cloudSign,
-                    path: track.path
+                    sign: nil,
+                    path: nil,
+                    displayPath: folderPath
                 )
             }
-            .sorted {
-                $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
-            }
+        }
+
+        let sortedFolders = folders.values.sorted {
+            $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+        }
+        let sortedFiles = directFiles.sorted {
+            $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+        }
+        return sortedFolders + sortedFiles
     }
 
     // 音楽ファイルか判定
@@ -2814,7 +3104,10 @@ struct ContentView: View {
 
     // ファイルのフルパスを作成
     private func makePath(for file: OpenListFile) -> String {
-        file.path ?? "\(currentPath)/\(file.name)"
+        if file.is_dir {
+            return file.displayPath ?? file.path ?? "\(currentPath)/\(file.name)"
+        }
+        return file.path ?? file.displayPath ?? "\(currentPath)/\(file.name)"
     }
 
     // MARK: - バックグラウンド再生
@@ -2988,7 +3281,12 @@ struct ContentView: View {
         } catch {
             isOfflineMode = true
             files = makeOfflineFiles()
-            libraryScanStatus = "オフラインモード：保存済み \(files.count) 曲"
+            if files.isEmpty && currentPath != "/terabox" {
+                currentPath = "/terabox"
+                files = makeOfflineFiles()
+            }
+            let savedTrackCount = files.filter { !$0.is_dir }.count
+            libraryScanStatus = "オフラインモード：保存済み \(savedTrackCount) 曲"
             errorMessage = "OpenList接続エラー：\(error.localizedDescription)"
             print("OpenList接続エラー: \(String(reflecting: error))")
         }
@@ -3149,8 +3447,7 @@ struct ContentView: View {
     // 1つ上のフォルダへ移動
     private func goToParentFolder() async {
 
-        guard !isOfflineMode,
-              currentPath != "/terabox" else {
+        guard currentPath != "/terabox" else {
             return
         }
 
