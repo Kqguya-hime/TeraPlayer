@@ -620,7 +620,7 @@ struct ContentView: View {
                                 if let track = musicTracks.first(where: { $0.path == makePath(for: file) }) {
                                     errorMessage = ""
                                     selectedTrackForMove = track
-                                    movePickerPath = currentPath
+                                    movePickerPath = (track.path as NSString).deletingLastPathComponent
                                     isMoveDestinationPickerPresented = true
                                     isSelectingTrackForMove = false
                                 } else {
@@ -769,9 +769,8 @@ struct ContentView: View {
         var folders = Set<String>()
 
         for track in musicTracks {
-            if isOfflineMode && !track.isDownloaded { continue }
-
-            let path = track.displayPath
+            // 移動先として選べるのは、現在クラウド上に存在するフォルダーだけ。
+            let path = track.path
             guard path.hasPrefix(prefix) else { continue }
 
             let remainder = String(path.dropFirst(prefix.count))
