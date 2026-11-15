@@ -28,6 +28,7 @@ final class MusicTrack {
 
     // オフライン保存情報
     var isDownloaded: Bool
+    // OfflineMusicフォルダーからの相対パス。フォルダー階層を含む場合がある。
     var localFileName: String?
 
     // オフライン中に指定した移動先。クラウド反映が完了するまで保持する。
