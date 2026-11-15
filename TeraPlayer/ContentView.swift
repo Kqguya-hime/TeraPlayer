@@ -429,7 +429,9 @@ struct ContentView: View {
                 print("Wi-Fi接続を検知：ライブラリ再接続と自動同期を開始")
                 Task {
                     await loadFiles()
-                    await scanLibrary()
+                    if !isOfflineMode {
+                        await scanLibrary()
+                    }
                 }
                 retryInterruptedDownloadsIfNeeded()
             } else if networkMonitor.isWiFiStatusKnown {
@@ -453,7 +455,9 @@ struct ContentView: View {
                 print("アプリ復帰：Wi-Fi接続中のため自動同期")
                 Task {
                     await loadFiles()
-                    await scanLibrary()
+                    if !isOfflineMode {
+                        await scanLibrary()
+                    }
                 }
             }
         }
