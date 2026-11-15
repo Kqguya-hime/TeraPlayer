@@ -12,6 +12,9 @@ import Combine
 @MainActor
 final class NetworkMonitor: ObservableObject {
 
+    // 初回のネットワーク判定が完了したか
+    @Published private(set) var isWiFiStatusKnown = false
+
     // Wi-Fi接続状態
     @Published private(set) var isWiFiConnected = false
 
@@ -34,14 +37,16 @@ final class NetworkMonitor: ObservableObject {
 
         monitor.pathUpdateHandler = { [weak self] path in
 
-            // Wi-Fiで通信可能な状態か確認
+            // OpenListは現在LAN内にあるため、Wi-Fiで通信可能な状態を確認する。
             let connected =
                 path.status == .satisfied &&
                 path.usesInterfaceType(.wifi)
 
-            // メインスレッドで状態を更新
+            // メインスレッドで状態を更新する。
             Task { @MainActor [weak self] in
-                self?.isWiFiConnected = connected
+                guard let self else { return }
+                self.isWiFiConnected = connected
+                self.isWiFiStatusKnown = true
             }
         }
 
