@@ -11,11 +11,21 @@ import Foundation
 
 // 大きな音楽ファイルの取得・送信に備え、標準より長い通信時間を設定する。
 enum OpenListNetworkSession {
+    // 音楽ファイルの転送用。大容量転送に備えて長いタイムアウトを維持する。
     static let shared: URLSession = {
         let configuration = URLSessionConfiguration.default
         configuration.timeoutIntervalForRequest = 1800
         configuration.timeoutIntervalForResource = 3600
         configuration.waitsForConnectivity = true
+        return URLSession(configuration: configuration)
+    }()
+
+    // ライブラリ一覧取得専用。Wi-Fi接続中でも応答がなければ短時間で失敗させる。
+    static let library: URLSession = {
+        let configuration = URLSessionConfiguration.default
+        configuration.timeoutIntervalForRequest = 10
+        configuration.timeoutIntervalForResource = 20
+        configuration.waitsForConnectivity = false
         return URLSession(configuration: configuration)
     }()
 }
@@ -82,7 +92,7 @@ final class OpenListService {
         let url = URL(string: "\(baseURL)/api/fs/list")!
 
         var request = URLRequest(url: url)
-        request.timeoutInterval = 300
+        request.timeoutInterval = 10
         request.httpMethod = "POST"
         request.setValue(token, forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -99,7 +109,7 @@ final class OpenListService {
             withJSONObject: body
         )
 
-        let (data, response) = try await OpenListNetworkSession.shared.data(
+        let (data, response) = try await OpenListNetworkSession.library.data(
             for: request
         )
 
