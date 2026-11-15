@@ -2506,8 +2506,8 @@ struct ContentView: View {
             isScanningLibrary = false
         }
 
-        // 同期専用のデータベース操作領域
-        let syncContext = ModelContext(modelContext.container)
+        // 同期専用のデータベース操作領域。移動反映後に作成して最新パスを読み込む。
+        var syncContext: ModelContext? = nil
 
         let store = OfflineMusicStore()
 
@@ -2515,6 +2515,9 @@ struct ContentView: View {
 
             // 保留中の移動を先に反映する。失敗した場合はスキャンによる誤削除を防ぐ。
             try await processPendingRemoteMoves()
+
+            let scanContext = ModelContext(modelContext.container)
+            syncContext = scanContext
 
             // 1. クラウド上の全音楽ファイルを取得
             let scannedFiles = try await service.scanMusicFiles(
@@ -2526,7 +2529,7 @@ struct ContentView: View {
                 "\(scannedFiles.count)曲の差分を確認中..."
 
             // 2. データベースの既存データを取得
-            let existingTracks = try syncContext.fetch(
+            let existingTracks = try scanContext.fetch(
                 FetchDescriptor<MusicTrack>()
             )
 
@@ -2569,7 +2572,7 @@ struct ContentView: View {
                         fileSize: scanned.file.size
                     )
 
-                    syncContext.insert(track)
+                    scanContext.insert(track)
                     isNew = true
                 }
 
@@ -2713,9 +2716,9 @@ struct ContentView: View {
                     }
                 )
 
-                if let histories = try? syncContext.fetch(historyDescriptor) {
+                if let histories = try? scanContext.fetch(historyDescriptor) {
                     for history in histories {
-                        syncContext.delete(history)
+                        scanContext.delete(history)
                     }
                 }
 
@@ -2732,12 +2735,12 @@ struct ContentView: View {
                     unsavedHistorySeconds = 0
                 }
 
-                syncContext.delete(oldTrack)
+                scanContext.delete(oldTrack)
                 deletedCount += 1
             }
 
             // 10. データベースに保存
-            try syncContext.save()
+            try scanContext.save()
 
             // 11. 結果を表示
             libraryScanStatus =
@@ -2762,7 +2765,7 @@ struct ContentView: View {
         } catch {
 
             // スキャン全体が失敗した場合は変更を取り消す
-            syncContext.rollback()
+            syncContext?.rollback()
 
             errorMessage =
                 "ライブラリ同期エラー: \(error.localizedDescription)"
