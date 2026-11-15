@@ -15,8 +15,6 @@ struct OpenListFile: Identifiable, Decodable {
     let created: String?
     let sign: String?
     let path: String?
-    // オフライン表示用の仮想パス。pathは曲の安定した識別パスとして維持する。
-    let displayPath: String?
 
     init(
         name: String,
@@ -25,8 +23,7 @@ struct OpenListFile: Identifiable, Decodable {
         modified: String?,
         created: String?,
         sign: String?,
-        path: String? = nil,
-        displayPath: String? = nil
+        path: String? = nil
     ) {
         self.name = name
         self.size = size
@@ -35,10 +32,9 @@ struct OpenListFile: Identifiable, Decodable {
         self.created = created
         self.sign = sign
         self.path = path
-        self.displayPath = displayPath
     }
 
     var id: String {
-        path ?? displayPath ?? name
+        path ?? name
     }
 }
