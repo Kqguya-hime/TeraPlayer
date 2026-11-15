@@ -30,14 +30,6 @@ final class MusicTrack {
     var isDownloaded: Bool
     var localFileName: String?
 
-    // オフライン中に指定した移動先。クラウド反映が完了するまで保持する。
-    var pendingRemotePath: String? = nil
-
-    // 画面上で表示するパス。移動予約があれば移動先、なければ現在のクラウドパス。
-    var displayPath: String {
-        pendingRemotePath ?? path
-    }
-
     // ライブラリ管理情報
     var dateAdded: Date
     var lastPlayed: Date?
@@ -71,7 +63,6 @@ final class MusicTrack {
 
         self.isDownloaded = false
         self.localFileName = nil
-        self.pendingRemotePath = nil
 
         self.dateAdded = Date()
         self.lastPlayed = nil
