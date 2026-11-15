@@ -785,6 +785,7 @@ struct ContentView: View {
         }
 
         track.pendingRemotePath = destinationPath
+        organizeOfflineFilesIfNeeded()
 
         do {
             try modelContext.save()
@@ -3036,8 +3037,47 @@ struct ContentView: View {
             : currentPath.components(separatedBy: "/").last ?? "TeraBox"
     }
 
-    // 端末に実際に保存されている曲だけをオフライン一覧にする
+    // ダウンロード済み音源を、現在の表示パスに対応するローカルフォルダーへ配置する。
+    private func organizeOfflineFilesIfNeeded() {
+        let store = OfflineMusicStore()
+        var didChange = false
+
+        for track in musicTracks {
+            guard track.path.hasPrefix("/terabox/"),
+                  track.isDownloaded,
+                  let localFileName = track.localFileName,
+                  (try? store.fileExists(localFileName)) == true else {
+                continue
+            }
+
+            let parentPath = (track.displayPath as NSString).deletingLastPathComponent
+            let relativeDirectory = parentPath == "/terabox"
+                ? ""
+                : String(parentPath.dropFirst("/terabox/".count))
+            let currentDirectory = (localFileName as NSString).deletingLastPathComponent
+            let normalizedCurrentDirectory = currentDirectory == "." ? "" : currentDirectory
+
+            guard normalizedCurrentDirectory != relativeDirectory else { continue }
+
+            do {
+                track.localFileName = try store.moveFile(
+                    localFileName: localFileName,
+                    toRelativeDirectory: relativeDirectory
+                )
+                didChange = true
+            } catch {
+                print("オフライン音源のフォルダー整理に失敗: \(track.fileName) / \(error.localizedDescription)")
+            }
+        }
+
+        if didChange {
+            try? modelContext.save()
+        }
+    }
+
+    // 端末に実際に保存されている曲だけを、フォルダー階層を保って表示する。
     private func makeOfflineFiles() -> [OpenListFile] {
+        organizeOfflineFilesIfNeeded()
         let store = OfflineMusicStore()
         let prefix = currentPath + "/"
         var folders: [String: OpenListFile] = [:]
