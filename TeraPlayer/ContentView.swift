@@ -901,6 +901,10 @@ struct ContentView: View {
                 throw OpenListService.OpenListError.apiError(404, "移動後のファイルを確認できません")
             }
 
+            guard movedFile.size == track.fileSize else {
+                throw OpenListService.OpenListError.apiError(409, "移動先に同名の別ファイルが存在する可能性があります")
+            }
+
             track.path = destinationPath
             track.fileName = newFileName
             track.fileSize = movedFile.size
