@@ -890,8 +890,19 @@ struct ContentView: View {
                 to: destinationDirectory
             )
 
+            // 移動後の更新日時・署名を取得し、次回スキャンで音源を誤って再ダウンロードしないようにする。
+            let destinationFiles = try await service.getFiles(path: destinationDirectory)
+            guard let movedFile = destinationFiles.first(where: {
+                !$0.is_dir && $0.name == newFileName
+            }) else {
+                throw OpenListService.OpenListError.apiError(404, "移動後のファイルを確認できません")
+            }
+
             track.path = destinationPath
             track.fileName = newFileName
+            track.fileSize = movedFile.size
+            track.cloudModified = movedFile.modified
+            track.cloudSign = movedFile.sign
             track.pendingRemotePath = nil
 
             for history in playbackHistories where history.trackPath == oldPath {
