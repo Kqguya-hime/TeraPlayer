@@ -263,6 +263,7 @@ struct ContentView: View {
     @State private var files: [OpenListFile] = []
     @State private var currentPath = "/terabox"
     @State private var isOfflineMode = false
+    @State private var activeLibraryRequestID = UUID()
 
     // ライブラリ検索
     @State private var searchField: MusicSearchField = .title
@@ -403,7 +404,7 @@ struct ContentView: View {
             BackgroundDownloadManager.shared.restoreSession()
             configureAudioSession()
             configureNowPlaying()
-            await loadFiles()
+            // 初回のWi-Fi状態がNetworkMonitorから届いてからライブラリを読み込む。
         }
         .onReceive(
             NotificationCenter.default.publisher(
@@ -417,14 +418,23 @@ struct ContentView: View {
                 }
             }
         }
+        .onChange(of: networkMonitor.isWiFiStatusKnown) { _, isKnown in
+            // 起動直後の初回判定。Wi-Fiがなければ通信を試さず即座にオフラインへ移行。
+            if isKnown && !networkMonitor.isWiFiConnected {
+                activateOfflineMode()
+            }
+        }
         .onChange(of: networkMonitor.isWiFiConnected) { _, isConnected in
             if isConnected {
-                print("Wi-Fi接続を検知：自動同期を開始")
+                print("Wi-Fi接続を検知：ライブラリ再接続と自動同期を開始")
                 Task {
                     await loadFiles()
                     await scanLibrary()
                 }
                 retryInterruptedDownloadsIfNeeded()
+            } else if networkMonitor.isWiFiStatusKnown {
+                // 通信中にWi-Fiが切れた場合も、待たずに保存済みライブラリへ切り替える。
+                activateOfflineMode()
             }
         }
         .onChange(of: backgroundDownloadNeedsRetry) { _, needsRetry in
@@ -3014,21 +3024,42 @@ struct ContentView: View {
 
     private func loadFiles() async {
 
-        // 起動処理・Wi-Fi検知・画面更新による同時取得を防ぐ
+        // 初回のネットワーク判定が終わるまでは接続要求を開始しない。
+        guard networkMonitor.isWiFiStatusKnown else { return }
+
+        // OpenListは現在LAN内のPCで稼働しているため、Wi-Fi未接続なら即座にオフライン表示。
+        guard networkMonitor.isWiFiConnected else {
+            activateOfflineMode()
+            return
+        }
+
+        // 起動処理・Wi-Fi検知・手動更新による同時取得を防ぐ。
         guard !isLoading else {
             print("ライブラリ取得をスキップ：別の取得処理が実行中")
             return
         }
 
+        let requestID = UUID()
+        activeLibraryRequestID = requestID
         isLoading = true
         errorMessage = ""
 
         defer {
-            isLoading = false
+            // 古い通信処理が、新しい通信処理の読み込み状態を解除しないようにする。
+            if activeLibraryRequestID == requestID {
+                isLoading = false
+            }
         }
 
         do {
             let loadedFiles = try await service.getFiles(path: currentPath)
+
+            // 通信中にWi-Fiが切断された、または新しい要求に置き換わった場合は結果を破棄。
+            guard activeLibraryRequestID == requestID,
+                  networkMonitor.isWiFiConnected else {
+                return
+            }
+
             files = loadedFiles
 
             if isOfflineMode {
@@ -3038,12 +3069,21 @@ struct ContentView: View {
             isOfflineMode = false
 
         } catch {
-            isOfflineMode = true
-            files = makeOfflineFiles()
-            libraryScanStatus = "オフラインモード：保存済み \(offlineSavedTrackCount) 曲"
-            errorMessage = "OpenList接続エラー：\(error.localizedDescription)"
-            print("OpenList接続エラー: \(String(reflecting: error))")
+            guard activeLibraryRequestID == requestID else { return }
+            activateOfflineMode(errorMessage: "OpenList接続エラー：\\(error.localizedDescription)")
+            print("OpenList接続エラー: \\(String(reflecting: error))")
         }
+    }
+
+    // Wi-Fi未接続、またはOpenListへの接続失敗時に保存済みライブラリを表示する。
+    private func activateOfflineMode(errorMessage: String? = nil) {
+        // 実行中の通信結果を無効化し、再接続後の新しい要求を妨げない。
+        activeLibraryRequestID = UUID()
+        isLoading = false
+        isOfflineMode = true
+        files = makeOfflineFiles()
+        libraryScanStatus = "オフラインモード：保存済み \\(offlineSavedTrackCount) 曲"
+        self.errorMessage = errorMessage ?? ""
     }
 
     // オフライン保存済みファイルが存在すれば、クラウドから再取得せず利用する。
