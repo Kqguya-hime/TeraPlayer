@@ -189,6 +189,26 @@ final class OpenListService {
             return
         }
 
+        // 通信切断などで「サーバー側は移動済み、端末側は未確定」になった場合に備え、
+        // 移動前に送信元・移動先を確認して再試行を安全にする。
+        let sourceFiles = try await getFiles(path: sourceDirectory)
+        let destinationFiles = try await getFiles(path: destinationDirectory)
+        let sourceExists = sourceFiles.contains { !$0.is_dir && $0.name == fileName }
+        let destinationExists = destinationFiles.contains { !$0.is_dir && $0.name == fileName }
+
+        if !sourceExists && destinationExists {
+            // 前回の要求でクラウド側だけ移動が完了していた。
+            return
+        }
+
+        guard sourceExists else {
+            throw OpenListError.apiError(404, "移動元ファイルが見つかりません")
+        }
+
+        guard !destinationExists else {
+            throw OpenListError.apiError(409, "移動先に同名ファイルが存在します")
+        }
+
         let url = URL(string: "\(baseURL)/api/fs/move")!
         var request = URLRequest(url: url)
         request.timeoutInterval = 1800
