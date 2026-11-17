@@ -135,6 +135,19 @@ private enum MusicSearchField: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+private extension MusicSearchField {
+    func matches(_ track: MusicTrack, keyword: String) -> Bool {
+        switch self {
+        case .title:
+            return track.title.localizedCaseInsensitiveContains(keyword)
+        case .artist:
+            return track.artist?.localizedCaseInsensitiveContains(keyword) ?? false
+        case .album:
+            return track.album?.localizedCaseInsensitiveContains(keyword) ?? false
+        }
+    }
+}
+
 // 統計の集計期間
 private enum StatisticsPeriod: String, CaseIterable, Identifiable {
     case all = "全期間"
@@ -1117,15 +1130,7 @@ struct ContentView: View {
         let newItems = candidatePaths.compactMap { path -> QueueItem? in
             guard let track = tracksByPath[path] else { return nil }
             return QueueItem(
-                file: OpenListFile(
-                    name: track.fileName,
-                    size: track.fileSize,
-                    is_dir: false,
-                    modified: track.cloudModified,
-                    created: nil,
-                    sign: track.cloudSign,
-                    path: track.path
-                ),
+                file: track.asOpenListFile,
                 path: track.path,
                 source: .playlist
             )
@@ -1198,13 +1203,7 @@ struct ContentView: View {
                             .filter { track in
                                 let keyword = playlistTrackSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
                                 guard !keyword.isEmpty else { return true }
-                                let target: String?
-                                switch playlistTrackSearchField {
-                                case .title: target = track.title
-                                case .artist: target = track.artist
-                                case .album: target = track.album
-                                }
-                                return target?.localizedCaseInsensitiveContains(keyword) ?? false
+                                return playlistTrackSearchField.matches(track, keyword: keyword)
                             }
                             .sorted {
                                 $0.title.localizedStandardCompare($1.title) == .orderedAscending
@@ -2142,7 +2141,7 @@ struct ContentView: View {
                 .filter { $0.artist == artist }
                 .sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
                 .map { track in
-                    OpenListFile(name: track.fileName, size: track.fileSize, is_dir: false, modified: track.cloudModified, created: nil, sign: track.cloudSign, path: track.path)
+                    track.asOpenListFile
                 }
                 .filter { fileMatchesSearch($0) }
         }
@@ -2152,7 +2151,7 @@ struct ContentView: View {
                 .filter { $0.album == album }
                 .sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
                 .map { track in
-                    OpenListFile(name: track.fileName, size: track.fileSize, is_dir: false, modified: track.cloudModified, created: nil, sign: track.cloudSign, path: track.path)
+                    track.asOpenListFile
                 }
                 .filter { fileMatchesSearch($0) }
         }
@@ -2166,14 +2165,7 @@ struct ContentView: View {
         guard let track = musicTracks.first(where: { $0.path == makePath(for: file) }) else {
             return false
         }
-        switch searchField {
-        case .title:
-            return track.title.localizedCaseInsensitiveContains(keyword)
-        case .artist:
-            return track.artist?.localizedCaseInsensitiveContains(keyword) ?? false
-        case .album:
-            return track.album?.localizedCaseInsensitiveContains(keyword) ?? false
-        }
+        return searchField.matches(track, keyword: keyword)
     }
 
     // MARK: - 検索結果
@@ -2197,14 +2189,7 @@ struct ContentView: View {
                 return false
             }
 
-            switch searchField {
-            case .title:
-                return track.title.localizedCaseInsensitiveContains(keyword)
-            case .artist:
-                return track.artist?.localizedCaseInsensitiveContains(keyword) ?? false
-            case .album:
-                return track.album?.localizedCaseInsensitiveContains(keyword) ?? false
-            }
+            return searchField.matches(track, keyword: keyword)
         }
     }
 
@@ -2834,17 +2819,7 @@ struct ContentView: View {
             }
 
             if components.count == 1 {
-                directFiles.append(
-                    OpenListFile(
-                        name: track.fileName,
-                        size: track.fileSize,
-                        is_dir: false,
-                        modified: track.cloudModified,
-                        created: nil,
-                        sign: track.cloudSign,
-                        path: track.path
-                    )
-                )
+                directFiles.append(track.asOpenListFile)
             } else {
                 let name = String(firstComponent)
                 let folderPath = String(prefix.dropLast()) + "/" + name
@@ -3317,15 +3292,7 @@ struct ContentView: View {
 
         let newItems = candidates.map { track in
             QueueItem(
-                file: OpenListFile(
-                    name: track.fileName,
-                    size: track.fileSize,
-                    is_dir: false,
-                    modified: track.cloudModified,
-                    created: nil,
-                    sign: track.cloudSign,
-                    path: track.path
-                ),
+                file: track.asOpenListFile,
                 path: track.path,
                 source: .artistAlbum
             )
@@ -3382,15 +3349,7 @@ struct ContentView: View {
 
         let items = candidates.map { track in
             QueueItem(
-                file: OpenListFile(
-                    name: track.fileName,
-                    size: track.fileSize,
-                    is_dir: false,
-                    modified: track.cloudModified,
-                    created: nil,
-                    sign: track.cloudSign,
-                    path: track.path
-                ),
+                file: track.asOpenListFile,
                 path: track.path,
                 source: .automatic
             )
@@ -3533,15 +3492,7 @@ struct ContentView: View {
 
     private func queueItem(for track: MusicTrack, source: QueueSource) -> QueueItem {
         QueueItem(
-            file: OpenListFile(
-                name: track.fileName,
-                size: track.fileSize,
-                is_dir: false,
-                modified: track.cloudModified,
-                created: nil,
-                sign: track.cloudSign,
-                path: track.path
-            ),
+            file: track.asOpenListFile,
             path: track.path,
             source: source
         )
