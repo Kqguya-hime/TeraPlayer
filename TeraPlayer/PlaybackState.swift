@@ -1,5 +1,6 @@
 import AVFoundation
 import Observation
+import SwiftUI
 
 @MainActor
 @Observable
