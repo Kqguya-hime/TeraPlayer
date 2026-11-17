@@ -274,7 +274,7 @@ struct ContentView: View {
     
     // 現在表示しているファイル
     @State private var files: [OpenListFile] = []
-    @State private var currentPath = "/terabox"
+    @State private var currentPath = OpenListConfiguration.rootPath
     @State private var isOfflineMode = false
     @State private var activeLibraryRequestID = UUID()
 
@@ -482,7 +482,7 @@ struct ContentView: View {
         NavigationStack {
             List {
                 HStack(spacing: 8) {
-                    if currentPath != "/terabox" {
+                    if currentPath != OpenListConfiguration.rootPath {
                         Button {
                             Task { await goToParentFolder() }
                         } label: {
@@ -2205,7 +2205,7 @@ struct ContentView: View {
 
             // 1. クラウド上の全音楽ファイルを取得
             let scannedFiles = try await service.scanMusicFiles(
-                rootPath: "/terabox",
+                rootPath: OpenListConfiguration.rootPath,
                 musicExtensions: Set(musicExtensions)
             )
 
@@ -2221,7 +2221,7 @@ struct ContentView: View {
             var existingByPath: [String: MusicTrack] = [:]
 
             for track in existingTracks {
-                if track.path.hasPrefix("/terabox/") {
+                if track.path.hasPrefix(OpenListConfiguration.rootPath + "/") {
                     existingByPath[track.path] = track
                 }
             }
@@ -2602,7 +2602,7 @@ struct ContentView: View {
             )
 
             let tracks = allTracks.filter {
-                $0.path.hasPrefix("/terabox/")
+                $0.path.hasPrefix(OpenListConfiguration.rootPath + "/")
             }
 
             // 2. ダウンロードが必要な曲を抽出
@@ -2755,7 +2755,7 @@ struct ContentView: View {
     // MARK: - 基本処理
 
     private var folderName: String {
-        if currentPath == "/terabox" {
+        if currentPath == OpenListConfiguration.rootPath {
             return isOfflineMode ? "オフライン保存" : "TeraBox"
         }
 
@@ -2767,7 +2767,7 @@ struct ContentView: View {
         let store = OfflineMusicStore()
 
         return musicTracks.filter { track in
-            track.path.hasPrefix("/terabox/")
+            track.path.hasPrefix(OpenListConfiguration.rootPath + "/")
                 && track.isDownloaded
                 && track.localFileName != nil
                 && (try? store.fileExists(track.localFileName!)) == true
@@ -2779,15 +2779,15 @@ struct ContentView: View {
     // フォルダー構造専用のデータを別途保存する必要はない。
     private func makeOfflineFiles() -> [OpenListFile] {
         let store = OfflineMusicStore()
-        let prefix = currentPath == "/terabox"
-            ? "/terabox/"
+        let prefix = currentPath == OpenListConfiguration.rootPath
+            ? OpenListConfiguration.rootPath + "/"
             : currentPath + "/"
 
         var folders: [String: OpenListFile] = [:]
         var directFiles: [OpenListFile] = []
 
         for track in musicTracks {
-            guard track.path.hasPrefix("/terabox/"),
+            guard track.path.hasPrefix(OpenListConfiguration.rootPath + "/"),
                   track.isDownloaded,
                   let localFileName = track.localFileName,
                   (try? store.fileExists(localFileName)) == true,
@@ -3207,15 +3207,15 @@ struct ContentView: View {
     // 1つ上のフォルダへ移動
     private func goToParentFolder() async {
 
-        guard currentPath != "/terabox" else {
+        guard currentPath != OpenListConfiguration.rootPath else {
             return
         }
 
         let parentPath = (currentPath as NSString)
             .deletingLastPathComponent
 
-        guard parentPath == "/terabox"
-                || parentPath.hasPrefix("/terabox/") else {
+        guard parentPath == OpenListConfiguration.rootPath
+                || parentPath.hasPrefix(OpenListConfiguration.rootPath + "/") else {
             return
         }
 
