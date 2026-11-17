@@ -181,7 +181,7 @@ final class BackgroundDownloadManager: NSObject, URLSessionDownloadDelegate {
             )
 
         } catch {
-            print("ダウンロード状態の読み込み失敗: \(error)")
+            AppLogger.debug("ダウンロード状態の読み込み失敗: \(error)")
         }
     }
 
@@ -195,7 +195,7 @@ final class BackgroundDownloadManager: NSObject, URLSessionDownloadDelegate {
             try data.write(to: url, options: .atomic)
 
         } catch {
-            print("ダウンロード状態の保存失敗: \(error)")
+            AppLogger.debug("ダウンロード状態の保存失敗: \(error)")
         }
     }
 
@@ -247,7 +247,7 @@ final class BackgroundDownloadManager: NSObject, URLSessionDownloadDelegate {
 
                 self.notifyProgress()
 
-                print("復元されたダウンロードタスク数: \(tasks.count)")
+                AppLogger.debug("復元されたダウンロードタスク数: \(tasks.count)")
             }
         }
     }
@@ -421,7 +421,7 @@ final class BackgroundDownloadManager: NSObject, URLSessionDownloadDelegate {
                 )
             )
 
-            print("バックグラウンドダウンロード完了: \(info.path)")
+            AppLogger.debug("バックグラウンドダウンロード完了: \(info.path)")
 
         } catch {
 
@@ -457,7 +457,7 @@ final class BackgroundDownloadManager: NSObject, URLSessionDownloadDelegate {
 
         // ユーザーがキャンセルしたタスクは失敗にしない
         if cancelledTaskIDs.remove(task.taskIdentifier) != nil {
-            print("ダウンロードをキャンセルしました: \(task.taskIdentifier)")
+            AppLogger.debug("ダウンロードをキャンセルしました: \(task.taskIdentifier)")
             return
         }
 
@@ -567,7 +567,7 @@ final class BackgroundDownloadManager: NSObject, URLSessionDownloadDelegate {
 
                 } else {
 
-                    print("結果を保持します。SwiftDataへの保存に失敗しました")
+                    AppLogger.debug("結果を保持します。SwiftDataへの保存に失敗しました")
                 }
 
                 self.isDeliveringPendingResult = false
