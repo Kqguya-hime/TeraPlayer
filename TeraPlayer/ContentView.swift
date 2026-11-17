@@ -3370,33 +3370,16 @@ struct ContentView: View {
             $0.path == path
         }
 
-        // 最前列に追加
         let item = QueueItem(
             file: file,
             path: path,
             source: .manual
         )
-
-        queue.insert(item, at: 0)
-
-        // まだ再生中の曲がない場合はすぐ再生
-        if currentTrack == nil {
-
-            let firstItem = queue.removeFirst()
-
-            Task {
-                let success = await startTrack(firstItem)
-
-                if success && activeRefillCondition == nil {
-                    fillActiveShuffleQueue()
-                }
-            }
-        }
+        placeQueueItemAtFront(item)
     }
 
     // キュー内の曲を最前列に移動
     private func moveToFront(_ item: QueueItem) {
-
         guard let index = queue.firstIndex(where: {
             $0.id == item.id
         }) else {
@@ -3405,23 +3388,25 @@ struct ContentView: View {
 
         let selectedItem = queue.remove(at: index)
 
-        // キューから曲を選んだ場合は自動補充条件を解除するが、再生元は保持する
+        // 自動補充条件を解除するが、選択した曲の再生元は保持する
         isPlaylistPlayback = false
         activeRefillCondition = nil
 
-        queue.insert(selectedItem, at: 0)
+        placeQueueItemAtFront(selectedItem)
+    }
 
-        // 再生中の曲がない場合
-        if currentTrack == nil {
+    // 曲をキューの先頭へ配置し、再生中の曲がなければ再生を開始する
+    private func placeQueueItemAtFront(_ item: QueueItem) {
+        queue.insert(item, at: 0)
 
-            let firstItem = queue.removeFirst()
+        guard currentTrack == nil else { return }
 
-            Task {
-                let success = await startTrack(firstItem)
+        let firstItem = queue.removeFirst()
+        Task {
+            let success = await startTrack(firstItem)
 
-                if success && activeRefillCondition == nil {
-                    fillActiveShuffleQueue()
-                }
+            if success && activeRefillCondition == nil {
+                fillActiveShuffleQueue()
             }
         }
     }
