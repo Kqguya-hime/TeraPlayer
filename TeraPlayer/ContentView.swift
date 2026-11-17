@@ -977,7 +977,9 @@ struct ContentView: View {
     }
 
     private func playlistDetailScreen(_ playlist: MusicPlaylist) -> some View {
-        List {
+        let tracksByPath = musicTracksByPath
+
+        return List {
             Section {
                 HStack {
                     Button {
@@ -1016,7 +1018,7 @@ struct ContentView: View {
                 }
 
                 ForEach(playlist.trackPaths, id: \.self) { path in
-                    if let track = musicTracks.first(where: { $0.path == path }) {
+                    if let track = tracksByPath[path] {
                         VStack(alignment: .leading, spacing: 3) {
                             Text(track.title)
                             if let artist = track.artist, !artist.isEmpty {
@@ -1116,7 +1118,7 @@ struct ContentView: View {
         }
 
         // ライブラリから消えた曲は再生対象に含めない
-        let tracksByPath = Dictionary(uniqueKeysWithValues: musicTracks.map { ($0.path, $0) })
+        let tracksByPath = musicTracksByPath
         candidatePaths = candidatePaths.filter { tracksByPath[$0] != nil }
 
         // 同一プレイリスト内の重複パスも除外
@@ -1542,14 +1544,16 @@ struct ContentView: View {
     }
 
     private var nowPlayingPlaylistPickerSheet: some View {
-        NavigationStack {
+        let currentTrackMetadata = currentTrack.flatMap { musicTracksByPath[$0.path] }
+
+        return NavigationStack {
             List {
                 if let track = currentTrack {
                     Section("追加する楽曲") {
-                        Text(musicTracks.first(where: { $0.path == track.path })?.title
+                        Text(currentTrackMetadata?.title
                              ?? (track.file.name as NSString).deletingPathExtension)
                             .font(.headline)
-                        Text(musicTracks.first(where: { $0.path == track.path })?.artist
+                        Text(currentTrackMetadata?.artist
                              ?? "アーティスト情報なし")
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -1974,6 +1978,13 @@ struct ContentView: View {
         .navigationBarTitleDisplayMode(.inline)
     }
 
+    private var musicTracksByPath: [String: MusicTrack] {
+        Dictionary(
+            musicTracks.map { ($0.path, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+    }
+
     private var filteredPlaybackHistories: [PlaybackHistory] {
         guard let startDate = statisticsPeriod.startDate() else {
             return playbackHistories
@@ -1983,10 +1994,7 @@ struct ContentView: View {
     }
 
     private var trackStatistics: [TrackStatistic] {
-        let tracksByPath = Dictionary(
-            musicTracks.map { ($0.path, $0) },
-            uniquingKeysWith: { first, _ in first }
-        )
+        let tracksByPath = musicTracksByPath
 
         let grouped = Dictionary(grouping: filteredPlaybackHistories, by: \.trackPath)
 
@@ -2014,10 +2022,7 @@ struct ContentView: View {
 
     // 全期間の再生統計から「よく聴く曲」上位30曲を作成する
     private var personalizedTrackStatistics: [TrackStatistic] {
-        let tracksByPath = Dictionary(
-            musicTracks.map { ($0.path, $0) },
-            uniquingKeysWith: { first, _ in first }
-        )
+        let tracksByPath = musicTracksByPath
         let grouped = Dictionary(grouping: playbackHistories, by: \.trackPath)
 
         return grouped.compactMap { path, histories in
@@ -2051,10 +2056,7 @@ struct ContentView: View {
     }
 
     private var artistStatistics: [ArtistStatistic] {
-        let tracksByPath = Dictionary(
-            musicTracks.map { ($0.path, $0) },
-            uniquingKeysWith: { first, _ in first }
-        )
+        let tracksByPath = musicTracksByPath
 
         var counts: [String: Int] = [:]
 
@@ -2136,36 +2138,26 @@ struct ContentView: View {
     }
 
     private var libraryDisplayFiles: [OpenListFile] {
+        let keyword = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let tracksByPath = musicTracksByPath
+
         if let artist = selectedArtist {
             return musicTracks
                 .filter { $0.artist == artist }
+                .filter { keyword.isEmpty || searchField.matches($0, keyword: keyword) }
                 .sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
-                .map { track in
-                    track.asOpenListFile
-                }
-                .filter { fileMatchesSearch($0) }
+                .map(\.asOpenListFile)
         }
 
         if let album = selectedAlbum {
             return musicTracks
                 .filter { $0.album == album }
+                .filter { keyword.isEmpty || searchField.matches($0, keyword: keyword) }
                 .sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
-                .map { track in
-                    track.asOpenListFile
-                }
-                .filter { fileMatchesSearch($0) }
+                .map(\.asOpenListFile)
         }
 
         return displayedFiles
-    }
-
-    private func fileMatchesSearch(_ file: OpenListFile) -> Bool {
-        let keyword = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !keyword.isEmpty else { return true }
-        guard let track = musicTracks.first(where: { $0.path == makePath(for: file) }) else {
-            return false
-        }
-        return searchField.matches(track, keyword: keyword)
     }
 
     // MARK: - 検索結果
@@ -2179,13 +2171,14 @@ struct ContentView: View {
         }
 
         // メタデータ検索ではフォルダを除外
+        let tracksByPath = musicTracksByPath
         return files.filter { file in
             guard !file.is_dir, isMusicFile(file) else {
                 return false
             }
 
             let path = makePath(for: file)
-            guard let track = musicTracks.first(where: { $0.path == path }) else {
+            guard let track = tracksByPath[path] else {
                 return false
             }
 
