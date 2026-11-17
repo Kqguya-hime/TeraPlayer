@@ -133,9 +133,7 @@ final class OpenListService {
         // contentがnullの場合は空の配列として扱う
         let content = result.data?.content ?? []
         
-        print("===== OpenList API Response =====")
-        print(String(data: data, encoding: .utf8) ?? "読み取り失敗")
-        print("=================================")
+        AppLogger.debug("OpenList file list received: \(content.count) entries")
 
         return content
     }
