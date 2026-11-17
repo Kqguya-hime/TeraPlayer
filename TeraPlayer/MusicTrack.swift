@@ -70,3 +70,18 @@ final class MusicTrack {
         self.isFavorite = false
     }
 }
+
+
+extension MusicTrack {
+    var asOpenListFile: OpenListFile {
+        OpenListFile(
+            name: fileName,
+            size: fileSize,
+            is_dir: false,
+            modified: cloudModified,
+            created: nil,
+            sign: cloudSign,
+            path: path
+        )
+    }
+}
