@@ -17,6 +17,7 @@ final class PlaybackState {
     var isSeeking = false
 }
 
+@MainActor
 struct PlaybackTimelineView: View {
     @Bindable var playbackState: PlaybackState
     let seekPlayback: (Double) -> Void
