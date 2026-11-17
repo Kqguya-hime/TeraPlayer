@@ -3498,24 +3498,36 @@ struct ContentView: View {
         let neededCount = shuffleQueueCount - automaticCount
         guard neededCount > 0 else { return }
 
+        appendRandomTracks(
+            from: shuffleCandidateTracks,
+            count: neededCount,
+            source: .shuffle
+        )
+    }
+
+    // 指定された候補から、キュー内・再生中の曲を除いてランダムに追加する
+    private func appendRandomTracks(
+        from tracks: [MusicTrack],
+        count: Int,
+        source: QueueSource
+    ) {
+        guard count > 0 else { return }
+
         let excludedPaths = Set(queue.map(\.path)).union(
             currentTrack.map { [$0.path] } ?? []
         )
-        let candidates = shuffleCandidateTracks.filter {
-            !excludedPaths.contains($0.path)
-        }
-        let items = candidates.shuffled()
-            .prefix(neededCount)
-            .map { queueItem(for: $0, source: .shuffle) }
+        let items = tracks
+            .filter { !excludedPaths.contains($0.path) }
+            .shuffled()
+            .prefix(count)
+            .map { queueItem(for: $0, source: source) }
+
         queue.append(contentsOf: items)
     }
 
     // 全ライブラリからシャッフル再生を開始する
     private func startAllLibraryShuffle() {
-        let availableTracks = isOfflineMode
-            ? musicTracks.filter { $0.isDownloaded && $0.localFileName != nil }
-            : musicTracks
-        guard let selectedTrack = availableTracks.randomElement() else {
+        guard let selectedTrack = availableShuffleTracks.randomElement() else {
             errorMessage = "ライブラリに再生できる楽曲がありません"
             return
         }
@@ -3643,16 +3655,11 @@ struct ContentView: View {
             }
         }
 
-        let excludedPaths = Set(queue.map(\.path)).union(
-            currentTrack.map { [$0.path] } ?? []
+        appendRandomTracks(
+            from: unplayedTracks,
+            count: neededCount,
+            source: .unplayedShuffle
         )
-        let candidates = unplayedTracks.filter {
-            !excludedPaths.contains($0.path)
-        }
-        let items = candidates.shuffled()
-            .prefix(neededCount)
-            .map { queueItem(for: $0, source: .unplayedShuffle) }
-        queue.append(contentsOf: items)
     }
 
     // MARK: - 曲の再生
