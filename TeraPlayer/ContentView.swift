@@ -2216,6 +2216,9 @@ struct ContentView: View {
             let existingTracks = try syncContext.fetch(
                 FetchDescriptor<MusicTrack>()
             )
+            let syncPlaylists = try syncContext.fetch(
+                FetchDescriptor<MusicPlaylist>()
+            )
 
             // /terabox 配下の曲だけを比較対象にする
             var existingByPath: [String: MusicTrack] = [:]
@@ -2407,7 +2410,7 @@ struct ContentView: View {
                 }
 
                 // 削除された曲をすべての自作プレイリストから除外
-                for playlist in playlists where playlist.trackPaths.contains(deletedPath) {
+                for playlist in syncPlaylists where playlist.trackPaths.contains(deletedPath) {
                     playlist.trackPaths.removeAll { $0 == deletedPath }
                     playlist.updatedAt = Date()
                 }
@@ -3161,12 +3164,32 @@ struct ContentView: View {
             remotePath: path
         )
 
+        // クラウド更新成功後、最新の更新日時・署名を取得する。
+        // 一時ファイル名から元の名前へ戻した後の一覧情報を使用する。
+        let remoteParentPath = (path as NSString).deletingLastPathComponent
+        let remoteFileName = (path as NSString).lastPathComponent
+        let refreshedRemoteFile: OpenListFile?
+        do {
+            let remoteFiles = try await service.getFiles(path: remoteParentPath)
+            refreshedRemoteFile = remoteFiles.first {
+                !$0.is_dir && $0.name == remoteFileName
+            }
+        } catch {
+            // クラウド本体の置き換えは成功しているため、ローカル同期は続行する。
+            AppLogger.error("タグ編集後のクラウド情報取得に失敗: \(error.localizedDescription)")
+            refreshedRemoteFile = nil
+        }
+
         // クラウド更新成功後、SwiftDataとオフライン保存ファイルを同期する。
         if let track {
             track.title = title
             track.artist = artist.isEmpty ? nil : artist
             track.album = album.isEmpty ? nil : album
-            track.fileSize = updatedFileSize
+            track.fileSize = refreshedRemoteFile?.size ?? updatedFileSize
+            if let refreshedRemoteFile {
+                track.cloudModified = refreshedRemoteFile.modified
+                track.cloudSign = refreshedRemoteFile.sign
+            }
 
             // オフライン保存済みの場合だけ、既存の保存名を維持して内容を置き換える。
             if track.isDownloaded, let localFileName = track.localFileName {
@@ -3300,11 +3323,15 @@ struct ContentView: View {
             shuffle: queueShuffle
         )
 
-        // 再生中の曲がなければ先頭から再生
+        // 再生中の曲がなければ先頭から再生する。
+        // 再生に失敗した場合はキューから失わないよう先頭へ戻す。
         if currentTrack == nil, !queue.isEmpty {
             let firstItem = queue.removeFirst()
             Task {
-                await startTrack(firstItem)
+                let succeeded = await startTrack(firstItem)
+                if !succeeded {
+                    queue.insert(firstItem, at: 0)
+                }
             }
         }
     }
