@@ -153,7 +153,7 @@ final class OpenListUploadService {
             try await removeFile(directory: parentPath, name: backupName)
         } catch {
             // クラウド上の本体は更新済み。バックアップ削除失敗はログに残す。
-            print("編集前バックアップの削除に失敗: \(backupPath) / \(error.localizedDescription)")
+            AppLogger.debug("編集前バックアップの削除に失敗: \(backupPath) / \(error.localizedDescription)")
         }
     }
 
