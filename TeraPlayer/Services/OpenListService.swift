@@ -86,7 +86,7 @@ final class OpenListService {
 
     // MARK: - ファイル一覧取得
 
-    func getFiles(path: String) async throws -> [OpenListFile] {
+    func getFiles(path: String, refresh: Bool = false) async throws -> [OpenListFile] {
 
         let token = try authorizationToken()
         let url = URL(string: "\(baseURL)/api/fs/list")!
@@ -102,7 +102,7 @@ final class OpenListService {
             "password": "",
             "page": 1,
             "per_page": 0,
-            "refresh": false
+            "refresh": refresh
         ]
 
         request.httpBody = try JSONSerialization.data(
