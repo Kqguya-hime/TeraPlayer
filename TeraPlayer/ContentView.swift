@@ -1993,40 +1993,15 @@ struct ContentView: View {
         return playbackHistories.filter { $0.startedAt >= startDate }
     }
 
-    private var trackStatistics: [TrackStatistic] {
+    // 再生履歴を曲ごとに集計する
+    private func makeTrackStatistics(
+        from histories: [PlaybackHistory]
+    ) -> [TrackStatistic] {
         let tracksByPath = musicTracksByPath
+        let grouped = Dictionary(grouping: histories, by: \.trackPath)
 
-        let grouped = Dictionary(grouping: filteredPlaybackHistories, by: \.trackPath)
-
-        return grouped.compactMap { path, histories in
-            guard let track = tracksByPath[path] else { return nil }
-
-            return TrackStatistic(
-                path: path,
-                title: track.title,
-                artist: track.artist,
-                playCount: histories.count,
-                listenedSeconds: histories.reduce(0) { $0 + $1.listenedSeconds },
-                completionCount: histories.filter(\.completed).count
-            )
-        }
-        .sorted {
-            if $0.playCount != $1.playCount {
-                return $0.playCount > $1.playCount
-            }
-            return $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
-        }
-        .prefix(10)
-        .map { $0 }
-    }
-
-    // 全期間の再生統計から「よく聴く曲」上位30曲を作成する
-    private var personalizedTrackStatistics: [TrackStatistic] {
-        let tracksByPath = musicTracksByPath
-        let grouped = Dictionary(grouping: playbackHistories, by: \.trackPath)
-
-        return grouped.compactMap { path, histories in
-            guard let track = tracksByPath[path], !histories.isEmpty else {
+        return grouped.compactMap { path, trackHistories in
+            guard let track = tracksByPath[path], !trackHistories.isEmpty else {
                 return nil
             }
 
@@ -2034,25 +2009,44 @@ struct ContentView: View {
                 path: path,
                 title: track.title,
                 artist: track.artist,
-                playCount: histories.count,
-                listenedSeconds: histories.reduce(0) { $0 + $1.listenedSeconds },
-                completionCount: histories.filter(\.completed).count
+                playCount: trackHistories.count,
+                listenedSeconds: trackHistories.reduce(0) {
+                    $0 + $1.listenedSeconds
+                },
+                completionCount: trackHistories.filter(\.completed).count
             )
         }
-        .sorted {
-            if $0.playCount != $1.playCount {
-                return $0.playCount > $1.playCount
+    }
+
+    private var trackStatistics: [TrackStatistic] {
+        makeTrackStatistics(from: filteredPlaybackHistories)
+            .sorted {
+                if $0.playCount != $1.playCount {
+                    return $0.playCount > $1.playCount
+                }
+                return $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
             }
-            if $0.completionCount != $1.completionCount {
-                return $0.completionCount > $1.completionCount
+            .prefix(10)
+            .map { $0 }
+    }
+
+    // 全期間の再生統計から「よく聴く曲」上位30曲を作成する
+    private var personalizedTrackStatistics: [TrackStatistic] {
+        makeTrackStatistics(from: playbackHistories)
+            .sorted {
+                if $0.playCount != $1.playCount {
+                    return $0.playCount > $1.playCount
+                }
+                if $0.completionCount != $1.completionCount {
+                    return $0.completionCount > $1.completionCount
+                }
+                if $0.listenedSeconds != $1.listenedSeconds {
+                    return $0.listenedSeconds > $1.listenedSeconds
+                }
+                return $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
             }
-            if $0.listenedSeconds != $1.listenedSeconds {
-                return $0.listenedSeconds > $1.listenedSeconds
-            }
-            return $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
-        }
-        .prefix(30)
-        .map { $0 }
+            .prefix(30)
+            .map { $0 }
     }
 
     private var artistStatistics: [ArtistStatistic] {
