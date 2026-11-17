@@ -2,7 +2,7 @@ import Foundation
 
 final class OpenListUploadService {
 
-    static let uploadDirectory = "/terabox/TeraPlayer Upload"
+    static let uploadDirectory = OpenListConfiguration.uploadDirectory
 
     enum UploadError: LocalizedError {
         case tokenMissing
@@ -27,13 +27,13 @@ final class OpenListUploadService {
         }
     }
 
-    private let baseURL = "http://192.168.0.8:5244"
+    private let baseURL = OpenListConfiguration.baseURL
     private let openListService = OpenListService()
 
     // 専用フォルダがなければ作成する。
     private func ensureUploadDirectory() async throws {
-        let parentPath = "/terabox"
-        let folderName = "TeraPlayer Upload"
+        let parentPath = OpenListConfiguration.rootPath
+        let folderName = OpenListConfiguration.uploadFolderName
 
         let parentFiles = try await openListService.getFiles(path: parentPath)
         let folderExists = parentFiles.contains {
