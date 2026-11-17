@@ -309,14 +309,33 @@ struct ContentView: View {
     @State private var selectedMP3ForEditing: OpenListFile? = nil
     @State private var isSelectingMP3ForEditing = false
 
-    // プレイヤー
-    @State private var player = AVPlayer()
-    @State private var isPlaying = false
-    @State private var nowPlayingManager = NowPlayingManager()
-    @State private var timeObserverToken: Any? = nil
-    @State private var elapsedTime: Double = 0
-    @State private var playbackDuration: Double = 0
-    @State private var isSeeking = false
+    // プレイヤー状態は専用のObservableモデルで管理する。
+    @State private var playbackState = PlaybackState()
+
+    private var player: AVPlayer { playbackState.player }
+    private var isPlaying: Bool {
+        get { playbackState.isPlaying }
+        nonmutating set { playbackState.isPlaying = newValue }
+    }
+    private var nowPlayingManager: NowPlayingManager {
+        playbackState.nowPlayingManager
+    }
+    private var timeObserverToken: Any? {
+        get { playbackState.timeObserverToken }
+        nonmutating set { playbackState.timeObserverToken = newValue }
+    }
+    private var elapsedTime: Double {
+        get { playbackState.elapsedTime }
+        nonmutating set { playbackState.elapsedTime = newValue }
+    }
+    private var playbackDuration: Double {
+        get { playbackState.playbackDuration }
+        nonmutating set { playbackState.playbackDuration = newValue }
+    }
+    private var isSeeking: Bool {
+        get { playbackState.isSeeking }
+        nonmutating set { playbackState.isSeeking = newValue }
+    }
 
     // 統計用の現在の再生セッション
     @State private var activePlaybackHistory: PlaybackHistory? = nil
@@ -1355,32 +1374,10 @@ struct ContentView: View {
                             }
                             .frame(maxWidth: .infinity)
 
-                            VStack(spacing: 4) {
-                                Slider(
-                                    value: $elapsedTime,
-                                    in: 0...max(playbackDuration, 1),
-                                    onEditingChanged: { isEditing in
-                                        isSeeking = isEditing
-
-                                        if !isEditing {
-                                            seekPlayback(to: elapsedTime)
-                                        }
-                                    }
-                                )
-                                .disabled(playbackDuration <= 0)
-
-                                HStack {
-                                    Text(formattedTime(elapsedTime))
-                                    Spacer()
-                                    Text(
-                                        playbackDuration > 0
-                                            ? formattedTime(playbackDuration)
-                                            : "--:--"
-                                    )
-                                }
-                                .font(.caption.monospacedDigit())
-                                .foregroundStyle(.secondary)
-                            }
+                            PlaybackTimelineView(
+                                playbackState: playbackState,
+                                seekPlayback: { seekPlayback(to: $0) }
+                            )
 
                             HStack(spacing: 34) {
                                 Button {
@@ -2951,18 +2948,6 @@ struct ContentView: View {
                 updateNowPlayingInfo()
             }
         }
-    }
-
-    // 秒数を「分:秒」の形式に変換
-    private func formattedTime(_ seconds: Double) -> String {
-        guard seconds.isFinite else { return "--:--" }
-
-        let totalSeconds = Int(max(0, seconds))
-        return String(
-            format: "%d:%02d",
-            totalSeconds / 60,
-            totalSeconds % 60
-        )
     }
 
     // ロック画面に表示する情報を更新
