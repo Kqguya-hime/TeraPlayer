@@ -439,7 +439,7 @@ struct ContentView: View {
         }
         .onChange(of: networkMonitor.isWiFiConnected) { _, isConnected in
             if isConnected {
-                print("Wi-Fi接続を検知：ライブラリ再接続と自動同期を開始")
+                AppLogger.debug("Wi-Fi接続を検知：ライブラリ再接続と自動同期を開始")
                 Task {
                     await loadFiles()
                     if !isOfflineMode {
@@ -465,7 +465,7 @@ struct ContentView: View {
             }
 
             if phase == .active && networkMonitor.isWiFiConnected {
-                print("アプリ復帰：Wi-Fi接続中のため自動同期")
+                AppLogger.debug("アプリ復帰：Wi-Fi接続中のため自動同期")
                 Task {
                     await loadFiles()
                     if !isOfflineMode {
@@ -2310,7 +2310,7 @@ struct ContentView: View {
                     changedCount += 1
                 }
 
-                print(
+                AppLogger.debug(
                     "差分検出: \(isNew ? "新規" : "変更") / \(scanned.file.name)"
                 )
 
@@ -2373,14 +2373,14 @@ struct ContentView: View {
                     track.cloudModified = scanned.file.modified
                     track.cloudSign = scanned.file.sign
 
-                    print("メタデータ更新: \(track.title)")
+                    AppLogger.debug("メタデータ更新: \(track.title)")
 
                 } catch {
 
                     // 失敗した場合は次回の同期で再試行できるようにする
                     metadataFailures.append(scanned.file.name)
 
-                    print(
+                    AppLogger.debug(
                         "メタデータ取得失敗: \(scanned.file.name) / \(error.localizedDescription)"
                     )
                 }
@@ -2440,13 +2440,13 @@ struct ContentView: View {
                 メタデータ取得失敗：\(metadataFailures.count)曲
                 """
 
-            print("===== 差分同期完了 =====")
-            print("新規: \(newCount)")
-            print("変更: \(changedCount)")
-            print("変更なし: \(unchangedCount)")
-            print("削除: \(deletedCount)")
-            print("メタデータ失敗: \(metadataFailures.count)")
-            print("========================")
+            AppLogger.debug("===== 差分同期完了 =====")
+            AppLogger.debug("新規: \(newCount)")
+            AppLogger.debug("変更: \(changedCount)")
+            AppLogger.debug("変更なし: \(unchangedCount)")
+            AppLogger.debug("削除: \(deletedCount)")
+            AppLogger.debug("メタデータ失敗: \(metadataFailures.count)")
+            AppLogger.debug("========================")
 
         } catch {
 
@@ -2498,7 +2498,7 @@ struct ContentView: View {
             // ダウンロード自体が失敗した場合
             if result.localFileName == nil {
 
-                print(
+                AppLogger.debug(
                     "ダウンロード失敗: \(result.path) / \(result.errorMessage ?? "不明なエラー")"
                 )
 
@@ -2526,11 +2526,11 @@ struct ContentView: View {
                         files = makeOfflineFiles()
                     }
 
-                    print("保存完了: \(track.title)")
+                    AppLogger.debug("保存完了: \(track.title)")
 
                 } else {
 
-                    print("データベースに対象の曲がありません: \(result.path)")
+                    AppLogger.debug("データベースに対象の曲がありません: \(result.path)")
                 }
 
                 // SwiftDataへの保存が完了した後に受領通知
@@ -2538,7 +2538,7 @@ struct ContentView: View {
 
             } catch {
 
-                print(
+                AppLogger.debug(
                     "データベース更新失敗: \(error.localizedDescription)"
                 )
 
@@ -2565,7 +2565,7 @@ struct ContentView: View {
 
         isRecoveringDownloads = true
 
-        print("未完了のダウンロードを再試行します")
+        AppLogger.debug("未完了のダウンロードを再試行します")
 
         Task {
 
@@ -2720,7 +2720,7 @@ struct ContentView: View {
                         fileName: track.fileName
                     )
 
-                    print(
+                    AppLogger.debug(
                         "ダウンロードURL取得失敗: \(track.fileName) / \(error.localizedDescription)"
                     )
                 }
@@ -2982,12 +2982,6 @@ struct ContentView: View {
             duration: duration,
             isPlaying: isPlaying
         )
-        // デバッグ用
-        print("Now Playing更新: \(track.file.name)")
-        print(
-            "登録情報:",
-            MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
-            )
     }
     // MARK: - ファイル・フォルダ
 
@@ -3004,7 +2998,7 @@ struct ContentView: View {
 
         // 起動処理・Wi-Fi検知・手動更新による同時取得を防ぐ。
         guard !isLoading else {
-            print("ライブラリ取得をスキップ：別の取得処理が実行中")
+            AppLogger.debug("ライブラリ取得をスキップ：別の取得処理が実行中")
             return
         }
 
@@ -3040,7 +3034,7 @@ struct ContentView: View {
         } catch {
             guard activeLibraryRequestID == requestID else { return }
             activateOfflineMode(errorMessage: "OpenList接続エラー：\(error.localizedDescription)")
-            print("OpenList接続エラー: \(String(reflecting: error))")
+            AppLogger.debug("OpenList接続エラー: \(String(reflecting: error))")
         }
     }
 
@@ -3201,7 +3195,7 @@ struct ContentView: View {
                     track.isDownloaded = true
                 } catch {
                     // クラウド側は更新済み。古いローカル音源は誤再生させない。
-                    print("オフライン音源の更新に失敗: \(error.localizedDescription)")
+                    AppLogger.debug("オフライン音源の更新に失敗: \(error.localizedDescription)")
                     try? OfflineMusicStore().deleteFile(localFileName)
                     track.isDownloaded = false
                     track.localFileName = nil
@@ -3630,7 +3624,7 @@ struct ContentView: View {
         do {
             try modelContext.save()
         } catch {
-            print("未再生フラグの初期化に失敗: \(error.localizedDescription)")
+            AppLogger.debug("未再生フラグの初期化に失敗: \(error.localizedDescription)")
         }
     }
 
@@ -3711,14 +3705,14 @@ struct ContentView: View {
                     atPath: localURL.path
                 ) {
 
-                    print("ローカル再生: \(track.title)")
+                    AppLogger.debug("ローカル再生: \(track.title)")
 
                     musicURL = localURL
 
                 } else {
 
                     // ファイルが消失していた場合は保存状態をリセット
-                    print("ローカルファイルが見つかりません。クラウドから再生します")
+                    AppLogger.debug("ローカルファイルが見つかりません。クラウドから再生します")
 
                     track.isDownloaded = false
                     track.localFileName = nil
@@ -3742,7 +3736,7 @@ struct ContentView: View {
                 }
 
                 // 未ダウンロードならクラウドから再生
-                print("クラウド再生: \(item.file.name)")
+                AppLogger.debug("クラウド再生: \(item.file.name)")
 
                 musicURL = try await service.getMusicURL(
                     path: item.path
@@ -3809,7 +3803,7 @@ struct ContentView: View {
         do {
             try modelContext.save()
         } catch {
-            print("未再生フラグの保存に失敗: \(error.localizedDescription)")
+            AppLogger.debug("未再生フラグの保存に失敗: \(error.localizedDescription)")
         }
     }
 
@@ -3839,7 +3833,7 @@ struct ContentView: View {
 
             try modelContext.save()
         } catch {
-            print("再生履歴の開始保存に失敗: \(error.localizedDescription)")
+            AppLogger.debug("再生履歴の開始保存に失敗: \(error.localizedDescription)")
         }
     }
 
@@ -3888,7 +3882,7 @@ struct ContentView: View {
             try modelContext.save()
             unsavedHistorySeconds = 0
         } catch {
-            print("再生時間の途中保存に失敗: \(error.localizedDescription)")
+            AppLogger.debug("再生時間の途中保存に失敗: \(error.localizedDescription)")
         }
     }
 
@@ -3907,7 +3901,7 @@ struct ContentView: View {
         do {
             try modelContext.save()
         } catch {
-            print("再生履歴の終了保存に失敗: \(error.localizedDescription)")
+            AppLogger.debug("再生履歴の終了保存に失敗: \(error.localizedDescription)")
         }
 
         activePlaybackHistory = nil
