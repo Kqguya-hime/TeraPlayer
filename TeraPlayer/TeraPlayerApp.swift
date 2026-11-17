@@ -38,7 +38,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         completionHandler: @escaping () -> Void
     ) {
 
-        print("バックグラウンド通信イベント受信: \(identifier)")
+        AppLogger.debug("バックグラウンド通信イベント受信: \(identifier)")
 
         // iOSから渡された完了通知を保存
         backgroundSessionCompletionHandler = completionHandler
