@@ -3308,7 +3308,9 @@ struct ContentView: View {
             let firstItem = queue.removeFirst()
             Task {
                 let succeeded = await startTrack(firstItem)
-                if !succeeded {
+                if !succeeded,
+                   currentTrack?.path != firstItem.path,
+                   !queue.contains(where: { $0.path == firstItem.path }) {
                     queue.insert(firstItem, at: 0)
                 }
             }
