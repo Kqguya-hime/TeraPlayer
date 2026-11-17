@@ -3149,7 +3149,7 @@ struct ContentView: View {
         let remoteFileName = (path as NSString).lastPathComponent
         let refreshedRemoteFile: OpenListFile?
         do {
-            let remoteFiles = try await service.getFiles(path: remoteParentPath)
+            let remoteFiles = try await service.getFiles(path: remoteParentPath, refresh: true)
             refreshedRemoteFile = remoteFiles.first {
                 !$0.is_dir && $0.name == remoteFileName
             }
