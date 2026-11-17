@@ -32,7 +32,7 @@ enum OpenListNetworkSession {
 
 final class OpenListService {
 
-    private let baseURL = "http://192.168.0.4:5244"
+    private let baseURL = OpenListConfiguration.baseURL
 
     private func authorizationToken() throws -> String {
         guard let token = try OpenListTokenStore.load(), !token.isEmpty else {
